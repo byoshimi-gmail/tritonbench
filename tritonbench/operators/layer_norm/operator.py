@@ -93,12 +93,14 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self):
         eps = 1e-5
 
+        
         # If N is provided, use only that value; otherwise use the default range
         if self.N is not None:
             N_values = [self.N]
         else:
             N_values = [512 * i for i in range(2, 32)]
 
+        
         for N in N_values:
             x_shape = (self.M, N)
             w_shape = (x_shape[-1],)
