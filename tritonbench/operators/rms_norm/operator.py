@@ -86,6 +86,7 @@ class Operator(BenchmarkOperator):
         else:
             H_values = [2**i for i in range(10, 16)]
 
+        
         for H in H_values:
             x_shape = (self.M, H)
             _input = torch.randn(x_shape, dtype=self.dtype, device=self.device)
