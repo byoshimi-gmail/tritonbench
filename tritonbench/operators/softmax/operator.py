@@ -43,6 +43,14 @@ def parse_op_args(args: List[str]):
 
 class Operator(BenchmarkOperator):
     is_compute_bound = False
+    
+    def __init__(
+        self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
+    ):
+        super().__init__(tb_args, extra_args)
+        args = parse_op_args(self.extra_args)
+        self.M = args.M
+        self.N = args.N
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
@@ -158,6 +166,7 @@ class Operator(BenchmarkOperator):
         else:
             shapes = [(self.M, 128 * i) for i in range(2, 100)]
 
+        
         if is_fbcode() and self.tb_args.production_shapes:
             additional_shapes = get_production_shapes(
                 self.name, "softmax", self.tb_args.shuffle_shapes
@@ -165,6 +174,7 @@ class Operator(BenchmarkOperator):
             if additional_shapes:
                 shapes.extend(additional_shapes)
 
+        
         for M, N in shapes:
             yield (torch.randn([M, N], dtype=self.dtype, device=self.device),)
 
