@@ -170,148 +170,6 @@ def _do_bench_profiler(
     """Measure GPU kernel execution time using PyTorch profiler.
 
     This method profiles the function and extracts the actual GPU kernel execution
-    time by summing up all CUDA kernel durations (excluding overlaps) from the profiler trace.
-
-    Args:
-        fn: Function to benchmark
-        warmup: Target warmup time in milliseconds (matches triton.testing.do_bench)
-        rep: Target total measurement time in milliseconds (matches triton.testing.do_bench)
-        return_mode: "all" for list of measurements, other modes for single values
-        grad_to_none: Tensors whose gradients should be cleared before each measurement
-        use_cudagraph: Whether to use CUDA graphs for benchmarking
-
-    Returns:
-        List of measured kernel times in milliseconds (if return_mode="all") or single value.
-    """
-    # Get cache for L2 cache clearing
-    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
-
-    # First, estimate the runtime to calculate iterations
-    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
-
-    # Calculate number of iterations based on target rep time
-    if estimate_ms == 0:
-        n_repeat = 100  # Default if function is very fast
-    else:
-        n_repeat = max(1, int(rep / estimate_ms))
-
-    # Helper function to execute one iteration
-    def run_iteration():
-        if grad_to_none is not None:
-            for x in grad_to_none:
-                x.grad = None
-        cache.zero_()
-        fn()
-
-    if use_cudagraph:
-        # Create CUDA graph
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            for _ in range(n_repeat):
-                run_iteration()
-        torch.cuda.synchronize()
-    else:
-        # Regular mode warmup
-        n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else 25
-
-        torch.cuda.synchronize()
-        for _ in range(n_warmup):
-            run_iteration()
-        torch.cuda.synchronize()
-
-    n_profiler_runs = 5
-    iterations_per_profiler_run = n_repeat
-
-    # Benchmark phase - collect kernel times for each iteration
-    all_kernel_times = []
-    profiler_config = {
-        "activities": [
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        "record_shapes": False,
-        "profile_memory": False,
-        "with_stack": False,
-    }
-
-    for _ in range(n_profiler_runs):
-        # Profile execution
-        with torch.profiler.profile(**profiler_config) as prof:
-            if use_cudagraph:
-                g.replay()
-            else:
-                # Execute multiple iterations for regular mode
-                for _ in range(iterations_per_profiler_run):
-                    run_iteration()
-            torch.cuda.synchronize()
-
-        # Collect all kernel execution intervals
-        kernel_intervals = []
-
-        # Get raw function events and collect time intervals
-        for evt in prof.events():
-            # Check for CUDA kernel events, excluding cache clear kernel
-            if (
-                evt.device_type == torch.autograd.DeviceType.CUDA
-                and hasattr(evt, "time_range")
-                and evt.name != CACHE_CLEAR_KERNEL
-            ):
-                # time_range has start and end attributes in microseconds
-                start_us = evt.time_range.start
-                end_us = evt.time_range.end
-                if start_us < end_us:  # Valid interval
-                    kernel_intervals.append((start_us, end_us))
-
-        # Merge overlapping intervals to get actual GPU busy time
-        # This algorithm handles concurrent kernels across multiple streams by:
-        # 1. Sorting all kernel intervals by start time
-        # 2. Merging overlapping intervals to avoid double-counting concurrent execution
-        # 3. Summing only the time when at least one kernel is running
-        # This gives us the true GPU wall-clock time, excluding idle gaps between kernels
-        if kernel_intervals:
-            # Sort intervals by start time
-            kernel_intervals.sort(key=lambda x: x[0])
-
-            # Merge overlapping intervals using a sweep-line algorithm
-            # Example: [(0,5), (3,8), (10,15)] -> [(0,8), (10,15)]
-            merged_intervals = [kernel_intervals[0]]
-            for start, end in kernel_intervals[1:]:
-                last_start, last_end = merged_intervals[-1]
-
-                if start <= last_end:
-                    # Overlapping or adjacent intervals, merge them
-                    # Take the max of end times to handle nested intervals
-                    merged_intervals[-1] = (last_start, max(last_end, end))
-                else:
-                    # Non-overlapping interval, add as new
-                    merged_intervals.append((start, end))
-
-            # Calculate total GPU busy time by summing merged intervals
-            total_kernel_time_us = sum(end - start for start, end in merged_intervals)
-        else:
-            # No kernel events found - this likely indicates an issue
-            raise RuntimeError(
-                "No CUDA kernel events found in profiler trace. "
-                "This may indicate the function is not executing any GPU kernels, "
-                "or there's an issue with profiler event collection."
-            )
-
-        # Convert to milliseconds and normalize by iterations
-        total_kernel_time_ms = (
-            total_kernel_time_us / 1000.0
-        ) / iterations_per_profiler_run
-        all_kernel_times.append(total_kernel_time_ms)
-
-    times = torch.tensor(all_kernel_times, dtype=torch.float)
-    return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
-
-
-def _do_bench_profiler(
-    fn, warmup, rep, return_mode="all", grad_to_none=None, use_cudagraph=False
-):
-    """Measure GPU kernel execution time using PyTorch profiler.
-
-    This method profiles the function and extracts the actual GPU kernel execution
     time by summing up all CUDA kernel durations from the profiler trace.
 
     Args:
@@ -372,7 +230,10 @@ def _do_bench_profiler(
     # Benchmark phase - collect kernel times for each iteration
     all_kernel_times = []
     profiler_config = {
-        "activities": [torch.autograd.ProfilerActivity.CUDA],
+        "activities": [
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
         "record_shapes": False,
         "profile_memory": False,
         "with_stack": False,
