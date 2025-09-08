@@ -195,7 +195,7 @@ def _do_bench_profiler(
         fn()
 
     # Initial warmup for compiler-based functions that need first few runs to do compilation
-    for _ in range(3):
+    for _ in range(20):
         run_iteration()
     torch.cuda.synchronize()
 
