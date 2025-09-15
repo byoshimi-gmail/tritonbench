@@ -27,6 +27,8 @@ import triton.language as tl  # @manual=//triton:triton
 from torch._library.triton import capture_triton
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+from .gdpa_blackwell_tlx import gdpa_backward_tlx, get_tlx_bwd_autotune_config
+
 from .gdpa_utils import (
     custom_triton_op,
     get_autotune_kernel,
@@ -42,11 +44,10 @@ from .math import (
     tanh_approx_fp32,
 )
 
-from .gdpa_blackwell_tlx import gdpa_backward_tlx, get_tlx_bwd_autotune_config
-
 try:
     # @manual=//triton:triton
     import triton.language.extra.tlx as tlx  # type: ignore
+
     HAS_TLX = True
 except ImportError:
     # suppress type checking errors
@@ -1084,6 +1085,7 @@ bwd_autotune_configs_ws = {
 bwd_autotune_configs_tlx = {
     "default": tuple(get_tlx_bwd_autotune_config()),
 }
+
 
 @lru_cache
 def get_autotune_bwd_kernel(kernel, restore_value, enable_ws, use_tlx):
@@ -2226,7 +2228,6 @@ def generalized_dot_product_attention_backward(
         BATCH,
     )
 
-
     # TMA descriptors require a global memory allocation
     def alloc_fn(size: int, alignment: int, _):
         return torch.empty(size, device="cuda", dtype=torch.int8)
@@ -2237,13 +2238,13 @@ def generalized_dot_product_attention_backward(
             k,
             shape=[N_CTX_KV * BATCH, HEAD_DIM * N_HEAD],
             strides=[HEAD_DIM * N_HEAD, 1],
-            block_shape=dummy_block
+            block_shape=dummy_block,
         )
         desc_v = TensorDescriptor(
             v,
             shape=[N_CTX_KV * BATCH, HEAD_DIM * N_HEAD],
             strides=[HEAD_DIM * N_HEAD, 1],
-            block_shape=dummy_block
+            block_shape=dummy_block,
         )
         desc_q = TensorDescriptor(
             q,

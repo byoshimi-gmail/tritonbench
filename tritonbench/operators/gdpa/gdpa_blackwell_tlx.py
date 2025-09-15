@@ -9,7 +9,7 @@ import triton.language.extra.tlx as tlx
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .gdpa_utils import get_num_sms
-from .math import activation_string_to_int, gelu, gelu_grad, fast_gelu_grad
+from .math import activation_string_to_int, fast_gelu_grad, gelu, gelu_grad
 
 
 def _host_descriptor_pre_hook(nargs):
@@ -451,7 +451,9 @@ def gdpa_kernel_tma_ws_blackwell(
                         # p1 = fast_gelu(qk1)
                         p1 = _fma_f32x2(qk1, tanh_approx_fp32(inner1), qk1)
                         p1 = p1.to(dtype)
-                        p0_view_2nd = tlx.subslice(p0_view, HEAD_DIM // 2, HEAD_DIM // 2)
+                        p0_view_2nd = tlx.subslice(
+                            p0_view, HEAD_DIM // 2, HEAD_DIM // 2
+                        )
                         tlx.local_store(p0_view_2nd, p1)
 
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
@@ -565,7 +567,9 @@ def gdpa_kernel_tma_ws_blackwell(
                         # p1 = fast_gelu(qk1)
                         p1 = _fma_f32x2(qk1, tanh_approx_fp32(inner1), qk1)
                         p1 = p1.to(dtype)
-                        p1_view_2nd = tlx.subslice(p1_view, HEAD_DIM // 2, HEAD_DIM // 2)
+                        p1_view_2nd = tlx.subslice(
+                            p1_view, HEAD_DIM // 2, HEAD_DIM // 2
+                        )
                         tlx.local_store(p1_view_2nd, p1)
 
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
@@ -1382,8 +1386,7 @@ def _gdpa_bwd_tlx_compute_num_steps(
             max(start_m_inner, start_n - WINDOW_SIZE) // BLOCK_M1
         ) * BLOCK_M1
         end_m_inner = (
-            tl.cdiv(min(qlen, start_n + BLOCK_N1 + WINDOW_SIZE), BLOCK_M1)
-            * BLOCK_M1
+            tl.cdiv(min(qlen, start_n + BLOCK_N1 + WINDOW_SIZE), BLOCK_M1) * BLOCK_M1
         )
         num_steps = (end_m_inner - start_m_inner) // BLOCK_M1
     return num_steps
@@ -1434,10 +1437,14 @@ def _gdpa_bwd_tlx_compute_activation(
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
-    num_steps = _gdpa_bwd_tlx_compute_num_steps(qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE)
+    num_steps = _gdpa_bwd_tlx_compute_num_steps(
+        qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE
+    )
 
     for i in tl.range(0, num_steps, 1, loop_unroll_factor=1):
-        tmem_buf_id, tmem_phase = _get_bufidx_phase(accum_cnt_inner + i, NUM_BUFFERS_TMEM)
+        tmem_buf_id, tmem_phase = _get_bufidx_phase(
+            accum_cnt_inner + i, NUM_BUFFERS_TMEM
+        )
         qk_tile = tlx.local_view(qk_tiles, tmem_buf_id)
         ppT_tile = tlx.local_view(ppT_tiles, tmem_buf_id)
         dpT_tile = tlx.local_view(dpT_tiles, tmem_buf_id)
@@ -1511,7 +1518,6 @@ def _gdpa_bwd_tlx_compute_activation(
         tlx.local_store(dsT_tile, dsT)
         tlx.barrier_arrive(dsT_full)
 
-
     offs_k = tl.arange(0, BLOCK_D)
     kmask = (offs_k[None, :] < HEAD_DIM) & (offs_n[:, None] < klen)
 
@@ -1528,6 +1534,7 @@ def _gdpa_bwd_tlx_compute_activation(
     tl.store(dk_ptrs, dk_r, mask=kmask)
 
     return num_steps
+
 
 @triton.jit
 def bwd_caculate_offsets(
@@ -1551,7 +1558,6 @@ def bwd_caculate_offsets(
     pid = off_seq_h // H
 
     return off_z, off_h, off_h_kv, off_q_z, pid
-
 
 
 @triton.jit
@@ -1657,13 +1663,16 @@ def gdpa_backward_tlx(
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
 ):
-
     # allocate smem buffers
     k_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tlx.dtype_of(desc_k), NUM_BUFFERS_KV)
     v_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tlx.dtype_of(desc_v), NUM_BUFFERS_KV)
     q_tiles = tlx.local_alloc((BLOCK_M1, BLOCK_D), tlx.dtype_of(desc_q), NUM_BUFFERS_Q)
-    do_tiles = tlx.local_alloc((BLOCK_M1, BLOCK_D), tlx.dtype_of(desc_do), NUM_BUFFERS_DO)
-    dsT_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tlx.dtype_of(desc_q), NUM_BUFFERS_DS)
+    do_tiles = tlx.local_alloc(
+        (BLOCK_M1, BLOCK_D), tlx.dtype_of(desc_do), NUM_BUFFERS_DO
+    )
+    dsT_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D), tlx.dtype_of(desc_q), NUM_BUFFERS_DS
+    )
 
     # allocate barriers for smem buffers
     k_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
@@ -1676,12 +1685,32 @@ def gdpa_backward_tlx(
     dsT_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_DS)
 
     # allocate tmem buffers
-    qk_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem)
-    ppT_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tlx.dtype_of(desc_do), NUM_BUFFERS_TMEM, tlx.storage_kind.tmem, reuse=qk_tiles)
-    dpT_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem, reuse=qk_tiles)
-    dv_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem)
-    dk_tiles = tlx.local_alloc((BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem)
-    dq_tiles = tlx.local_alloc((BLOCK_M1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem)
+    qk_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
+    )
+    ppT_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D),
+        tlx.dtype_of(desc_do),
+        NUM_BUFFERS_TMEM,
+        tlx.storage_kind.tmem,
+        reuse=qk_tiles,
+    )
+    dpT_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D),
+        tl.float32,
+        NUM_BUFFERS_TMEM,
+        tlx.storage_kind.tmem,
+        reuse=qk_tiles,
+    )
+    dv_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
+    )
+    dk_tiles = tlx.local_alloc(
+        (BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
+    )
+    dq_tiles = tlx.local_alloc(
+        (BLOCK_M1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
+    )
 
     # allocate barriers for tmem buffers
     qk_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
@@ -1694,7 +1723,7 @@ def gdpa_backward_tlx(
     dq_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
 
     with tlx.async_tasks():
-         # activation
+        # activation
         with tlx.async_task("default"):
             off_z, off_h, off_h_kv, off_q_z, pid = bwd_caculate_offsets(
                 seq_index,
@@ -1756,16 +1785,15 @@ def gdpa_backward_tlx(
                     activation_enum_int=activation_enum_int,
                 )
 
-
         # reduction
         with tlx.async_task(num_warps=4):
             off_z, off_h, off_h_kv, off_q_z, pid = bwd_caculate_offsets(
-                        seq_index,
-                        H,
-                        G,
-                        SORT_BY_SEQ_LENGTH,
-                        BROADCAST_Q,
-                    )
+                seq_index,
+                H,
+                G,
+                SORT_BY_SEQ_LENGTH,
+                BROADCAST_Q,
+            )
 
             begin_q = tl.load(Q_offsets + off_q_z)
             end_q = tl.load(Q_offsets + off_q_z + 1)
@@ -1785,7 +1813,9 @@ def gdpa_backward_tlx(
             if start_n < klen:
                 curr_m = start_m
                 step_m = BLOCK_M1
-                num_steps = _gdpa_bwd_tlx_compute_num_steps(qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE)
+                num_steps = _gdpa_bwd_tlx_compute_num_steps(
+                    qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE
+                )
 
                 for i in tl.range(0, num_steps, 1, loop_unroll_factor=1):
                     tmem_buf_id, tmem_phase = _get_bufidx_phase(i, NUM_BUFFERS_TMEM)
@@ -1810,7 +1840,6 @@ def gdpa_backward_tlx(
 
                     # Increment pointers.
                     curr_m += step_m
-
 
         # mma
         with tlx.async_task(num_warps=1):
@@ -1860,7 +1889,9 @@ def gdpa_backward_tlx(
                 # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
                 tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
-                num_steps = _gdpa_bwd_tlx_compute_num_steps(qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE)
+                num_steps = _gdpa_bwd_tlx_compute_num_steps(
+                    qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE
+                )
 
                 for i in tl.range(0, num_steps, 1, num_stages=0):
                     q_buf_id, q_phase = _get_bufidx_phase(i, NUM_BUFFERS_Q)
@@ -1918,7 +1949,7 @@ def gdpa_backward_tlx(
                         ppT_tile,
                         do_tile,
                         dv_tile,
-                        use_acc=i>0,
+                        use_acc=i > 0,
                         mBarriers=[do_empty, ppT_empty],
                     )
 
@@ -1928,7 +1959,7 @@ def gdpa_backward_tlx(
                         dsT_tile,
                         q_tile,
                         dk_tile,
-                        use_acc=i>0,
+                        use_acc=i > 0,
                         mBarriers=[q_empty],
                     )
 
@@ -1946,8 +1977,6 @@ def gdpa_backward_tlx(
                 # commit dk, dv
                 tlx.tcgen05_commit(dk_full)
                 tlx.tcgen05_commit(dv_full)
-
-
 
         # load
         with tlx.async_task(num_warps=1):
@@ -2012,7 +2041,9 @@ def gdpa_backward_tlx(
 
                 curr_m = start_m
                 step_m = BLOCK_M1
-                num_steps = _gdpa_bwd_tlx_compute_num_steps(qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE)
+                num_steps = _gdpa_bwd_tlx_compute_num_steps(
+                    qlen, start_n, BLOCK_M1, BLOCK_N1, WINDOW_SIZE
+                )
 
                 for i in tl.range(0, num_steps, 1, loop_unroll_factor=1):
                     q_buf_id, q_phase = _get_bufidx_phase(i, NUM_BUFFERS_Q)
@@ -2024,7 +2055,6 @@ def gdpa_backward_tlx(
                     do_tile = tlx.local_view(do_tiles, do_buf_id)
                     do_full = tlx.local_view(do_fulls, do_buf_id)
                     do_empty = tlx.local_view(do_empties, do_buf_id)
-
 
                     tlx.barrier_wait(q_empty, q_phase ^ 1)
                     tlx.barrier_expect_bytes(q_full, 2 * BLOCK_M1 * BLOCK_D)  # float16
