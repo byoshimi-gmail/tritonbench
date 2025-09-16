@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+from pathlib import Path
 import sys
 
 import yaml
@@ -11,8 +12,6 @@ logging.basicConfig(level=logging.INFO)
 
 
 from os.path import abspath, exists
-
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def setup_tritonbench_cwd():
@@ -34,6 +33,8 @@ def setup_tritonbench_cwd():
 
 setup_tritonbench_cwd()
 
+from tritonbench.utils.env_utils import REPO_PATH
+from tritonbench.utils.run_utils import run_in_task, setup_output_dir
 from tritonbench.operators import list_operators, load_opbench_by_name
 
 # operators that are not supported by tritonbench-oss
@@ -100,16 +101,30 @@ def run(args: argparse.Namespace):
             out.write(HEADER_TEMPLATE.format(DESCRIPTION=description) + yaml_str)
 
 
+def run_triton(args):
+    operators = list_operators()
+    run_timestamp, output_dir = setup_output_dir("gen_metadata")
+    # run just one iteration in test mode and dump Triton IR
+    args = ["--num-inputs", "1", "--rep", "10", "--warmup", "10", "--test-only", "--dump-ir", output_dir]
+    for op in operators:
+        op_args = ["--op", op] + args
+        run_in_task(op=op, op_args=op_args)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--triton-only", action="store_true", help="only triton operators")
     parser.add_argument(
         "--output",
         type=str,
-        default=os.path.join(CURRENT_DIR, "metadata"),
+        default=os.path.join(REPO_PATH, "tritonbench", "metadata"),
         help="generate metadata yaml files to the specific directory",
     )
     args = parser.parse_args()
-    run(args)
+    if args.triton_only:
+        run_triton(args)
+        return
+    run(args)    
 
 
 if __name__ == "__main__":
