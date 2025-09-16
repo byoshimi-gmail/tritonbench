@@ -101,19 +101,25 @@ def run(args: argparse.Namespace):
             out.write(HEADER_TEMPLATE.format(DESCRIPTION=description) + yaml_str)
 
 
-def run_triton(args):
-    operators = list_operators()
+def run_triton(args, op=None):
+    operators = list_operators() if not op else [op]
     run_timestamp, output_dir = setup_output_dir("gen_metadata")
     # run just one iteration in test mode and dump Triton IR
-    args = ["--num-inputs", "1", "--rep", "10", "--warmup", "10", "--test-only", "--dump-ir", output_dir]
+    args = ["--num-inputs", "1", "--rep", "10", "--warmup", "10", "--test-only", "--dump-ir", str(output_dir)]
+    # disable all caching
+    extra_envs = {
+        "TRITON_ALWAYS_COMPILE": "1",
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
+    }
     for op in operators:
         op_args = ["--op", op] + args
-        run_in_task(op=op, op_args=op_args)
+        run_in_task(op=op, op_args=op_args, extra_envs=extra_envs)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--triton-only", action="store_true", help="only triton operators")
+    parser.add_argument("--op", type=str, help="Run specific operator for debugging.")
+    parser.add_argument("--triton-only", action="store_true", help="only triton operators.")
     parser.add_argument(
         "--output",
         type=str,
@@ -122,9 +128,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.triton_only:
-        run_triton(args)
+        run_triton(args, op=args.op)
         return
-    run(args)    
+    run(args)
 
 
 if __name__ == "__main__":
