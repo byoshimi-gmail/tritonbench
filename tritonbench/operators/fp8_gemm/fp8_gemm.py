@@ -180,9 +180,7 @@ class Operator(BenchmarkOperator):
 
         @register_benchmark(enabled=True)
         def blackwell_persistent_tma_fp8_gemm(self, a, b, scale_a, scale_b):
-            return lambda: blackwell_persistent_tma(
-                a, b.T, scale_a, scale_b.T, self._get_dtype()
-            )
+            return lambda: blackwell_persistent_tma(a, b.T, scale_a, scale_b.T, self._get_dtype(), self.extra_args.scaling_rowwise)
 
     @register_benchmark()
     def triton_fp8_gemm(self, a, b, scale_a, scale_b):
