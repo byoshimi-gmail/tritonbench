@@ -117,6 +117,12 @@ def parse_op_args(args: List[str]):
         help="enable causal",
     )
     parser.add_argument(
+        "--window-size",
+        type=lambda x: tuple(map(int, x.split(","))),
+        default=(-1, -1),
+        help="sliding window size as (left_window, right_window). Use (-1, -1) to disable sliding window",
+    )
+    parser.add_argument(
         "--native-sdpa", action="store_true", help="Use SDPA native choice."
     )
     parser.add_argument(
@@ -177,6 +183,13 @@ class Operator(BenchmarkOperator):
         self.H = args.n_heads
         self.D_HEAD = args.d_head
         self.causal = args.causal
+        self.window_size = args.window_size
+        self.local = self.window_size != (-1, -1)
+
+        # Prioritize sliding window over causal when both are specified
+        if self.causal and self.local:
+            self.causal = False
+
         self.native_sdpa = args.native_sdpa
         self.pt2_sdpa = args.pt2_sdpa
         self.input_types = args.input_types
@@ -191,10 +204,22 @@ class Operator(BenchmarkOperator):
     ) -> Callable:
         def _inner():
             N_CTX = q.shape[2]
-            M = torch.tril(torch.ones((N_CTX, N_CTX), device=self.device))
+            N_CTX_KV = k.shape[2]
             p = torch.matmul(q, k.transpose(2, 3)) * self.sm_scale
+
             if self.causal:
+                M = torch.tril(torch.ones((N_CTX, N_CTX_KV), device=self.device))
                 p[:, :, M == 0] = float("-inf")
+            elif self.local:
+                # Create sliding window mask
+                i = torch.arange(N_CTX, device=self.device).unsqueeze(1)
+                j = torch.arange(N_CTX_KV, device=self.device).unsqueeze(0)
+                # Allow attention if within window (both left and right)
+                left_window, right_window = self.window_size
+                window_mask = (i - j) <= left_window & ((j - i) <= right_window)
+                # Note: causal is already handled separately above and should not be true when sliding_window is true
+                p[:, :, ~window_mask] = float("-inf")
+
             p = torch.softmax(p.float(), dim=-1).to(q.dtype)
             # p = torch.exp(p)
             ref_out = torch.matmul(p, v)
@@ -209,6 +234,10 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
+        if self.local:
+            # sdpa with flash attention backend doesn't support non-null attn_mask
+            raise NotImplementedError("Skip")
+
         def sdpa_flash_attention(q, k, v):
             cxt = (
                 nullcontext()
@@ -249,7 +278,10 @@ class Operator(BenchmarkOperator):
     ) -> Callable:
         qkv = make_packed_qkv(q, k, v)
         fn = lambda: flash_attn_func(
-            qkv, softmax_scale=self.sm_scale, causal=self.causal
+            qkv,
+            softmax_scale=self.sm_scale,
+            causal=self.causal,
+            window_size=self.window_size,
         )
         return fn
 
@@ -264,7 +296,17 @@ class Operator(BenchmarkOperator):
         q_1 = q_1.contiguous()
         k_1 = k_1.contiguous()
         v_1 = v_1.contiguous()
-        attn_bias = xformers.ops.LowerTriangularMask() if self.causal else None
+
+        # Create attention bias based on settings
+        attn_bias = None
+        if self.causal:
+            attn_bias = xformers.ops.LowerTriangularMask()
+        elif self.local:
+            attn_bias = xformers.ops.fmha.attn_bias.LocalAttentionFromBottomRightMask(
+                window_left=self.window_size[0],
+                window_right=self.window_size[1],
+            )
+
         fhma_input = xformers_fmha.Inputs(
             query=q_1, key=k_1, value=v_1, attn_bias=attn_bias, scale=self.sm_scale
         )
@@ -291,6 +333,9 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ):
+        if self.local or self.causal:
+            # SplitK doesn't support local attention yet
+            raise NotImplementedError("Skip")
         need_gradient = not (self.mode == BenchmarkMode.FWD_NO_GRAD)
         fhma_input = self.xformers_preprocess(q, k, v)
         xformers_splitk_fhma = xformers_fmha.triton_splitk.FwOp
@@ -303,6 +348,10 @@ class Operator(BenchmarkOperator):
         label=f"cudnn-sdpa-{torch.backends.cudnn.version()}",
     )
     def cudnn_sdpa(self, q, k, v):
+        if self.local:
+            # Skip CUDNN SDPA for local attention for now
+            raise NotImplementedError("Skip")
+
         return lambda: _sdpa_cudnn_attention(
             q, k, v, is_causal=self.causal, scale=self.sm_scale
         )
@@ -318,7 +367,12 @@ class Operator(BenchmarkOperator):
         k = k.transpose(1, 2).contiguous()
         v = v.transpose(1, 2).contiguous()
         return lambda: facute_flash_attn_func(
-            q, k, v, softmax_scale=self.sm_scale, causal=self.causal
+            q,
+            k,
+            v,
+            softmax_scale=self.sm_scale,
+            causal=self.causal,
+            window_size=self.window_size if self.local else (None, None),
         )
 
     @register_benchmark()
@@ -328,12 +382,27 @@ class Operator(BenchmarkOperator):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
+        def local_mask(b, h, q_idx, kv_idx):
+            # Left window check: allow tokens within left_window_size lookback
+            left_ok = q_idx - kv_idx <= self.window_size[0]
+            # Right window check: allow tokens within right_window_size lookahead
+            right_ok = kv_idx - q_idx <= self.window_size[1]
+            return left_ok & right_ok
+
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
+        B, H, S, D = q.shape
+        _, _, S_KV, _ = k.shape
+
+        mask_mod = None
         if self.causal:
-            B, H, S, D = q.shape
+            mask_mod = causal_mask
+        elif self.local:
+            mask_mod = local_mask
+
+        if mask_mod:
             block_mask = create_block_mask(
-                causal_mask, B=None, H=None, Q_LEN=S, KV_LEN=S
+                mask_mod, B=None, H=None, Q_LEN=S, KV_LEN=S_KV
             )
         else:
             block_mask = None
@@ -391,10 +460,24 @@ class Operator(BenchmarkOperator):
         q, k, v = example_inputs
         BATCH, H, N_CTX, D_HEAD = q.shape
         _, _, N_CTX_KV, _ = k.shape
-        flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX_KV * D_HEAD
-        flops = 2 * flops_per_matmul
-        if self.causal:
-            flops *= 0.5
+
+        if not self.local:
+            flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX_KV * D_HEAD
+            flops = 2 * flops_per_matmul
+            if self.causal:
+                flops *= 0.5
+        else:
+            row_idx = torch.arange(N_CTX, device="cuda")
+            col_left = torch.maximum(
+                row_idx + N_CTX_KV - N_CTX - self.window_size[0], torch.tensor(0)
+            )
+            col_right = torch.minimum(
+                row_idx + N_CTX_KV - N_CTX + self.window_size[1],
+                torch.tensor(N_CTX_KV - 1),
+            )
+            avg_seqlen = (col_right - col_left + 1).float().mean().item()
+            flops = 2 * 2.0 * BATCH * H * N_CTX * avg_seqlen * D_HEAD
+
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
         elif self.mode == BenchmarkMode.FWD_BWD:
@@ -436,8 +519,15 @@ class Operator(BenchmarkOperator):
             raise AssertionError(f"Unknown input type {self.input_types}")
 
     @register_x_val(label="(Batch, Heads, Heads_KV, SeqLen, SeqLen_KV, Dhead)")
-    def get_x_val(self, example_inputs) -> float:
+    def get_x_val(self, example_inputs) -> str:
         q, k, v = example_inputs
         B, H, S, D = q.shape
         _, H_KV, S_KV, _ = k.shape
-        return (B, H, H_KV, S, S_KV, D)
+
+        # Add local mask info to the label if enabled
+        base_info = f"({B}, {H}, {H_KV}, {S}, {S_KV}, {D})"
+        if self.local:
+            base_info += f" Local {self.window_size[0]},{self.window_size[1]}"
+        if self.causal:
+            base_info += " Causal"
+        return base_info
