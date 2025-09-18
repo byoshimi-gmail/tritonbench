@@ -297,12 +297,14 @@ def matmul_configs_blackwell():
     # Autotuner does not work with TMA. Use manual config.
     return {
         torch.float8_e4m3fn: {
-            "BLOCK_SIZE_M": 128,
-            "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 128,
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 32,
+            "BLOCK_SIZE_K": 32,
             "GROUP_SIZE_M": 8,
             "num_stages": 4,
             "num_warps": 4,  # Note: num_warps >= 4 required for TMA
+            "WARP_SPECIALIZE": True,
+            "EPILOGUE_SUBTILE": True,
         },
         torch.float16: {
             "BLOCK_SIZE_M": 128,
@@ -470,6 +472,8 @@ def blackwell_persistent_tma(
         num_stages=configs[shape_dtype]["num_stages"],  #
         num_warps=configs[shape_dtype]["num_warps"],  #
         SCALING_ROWWISE=scaling_rowwise,
+        WARP_SPECIALIZE=configs[shape_dtype]["WARP_SPECIALIZE"],  #
+        EPILOGUE_SUBTILE=configs[shape_dtype]["EPILOGUE_SUBTILE"],  #
     )
     return c
 
@@ -501,6 +505,8 @@ def blackwell_persistent_tma_kernel(
     ACC_TYPE: tl.constexpr,
     NUM_SMS: tl.constexpr,
     SCALING_ROWWISE: tl.constexpr,  #
+    WARP_SPECIALIZE: tl.constexpr,
+    EPILOGUE_SUBTILE: tl.constexpr,
 ):  #
     start_pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -524,7 +530,9 @@ def blackwell_persistent_tma_kernel(
         acc,
         shape=[M, N],
         strides=[N, 1],
-        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N],
+        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N // 2]
+        if EPILOGUE_SUBTILE
+        else [BLOCK_SIZE_M, BLOCK_SIZE_N],
     )
 
     tile_id_c = start_pid - NUM_SMS
@@ -540,7 +548,7 @@ def blackwell_persistent_tma_kernel(
         scale_b = tl.load(scale_b_ptr)
 
     for tile_id in tl.range(
-        start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=True
+        start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=WARP_SPECIALIZE
     ):
         pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         offs_am = pid_m * BLOCK_SIZE_M
@@ -577,5 +585,14 @@ def blackwell_persistent_tma_kernel(
         offs_cm = pid_m * BLOCK_SIZE_M
         offs_cn = pid_n * BLOCK_SIZE_N
 
-        c = accumulator.to(ACC_TYPE)
-        acc_desc.store([offs_cm, offs_cn], c)
+        if EPILOGUE_SUBTILE:
+            acc_reshaped = tl.reshape(accumulator, (BLOCK_SIZE_M, 2, BLOCK_SIZE_N // 2))
+            acc_permuted = tl.permute(acc_reshaped, (0, 2, 1))
+            acc0, acc1 = tl.split(acc_permuted)
+            c0 = acc0.to(ACC_TYPE)
+            acc_desc.store([offs_cm, offs_cn], c0)
+            c1 = acc1.to(ACC_TYPE)
+            acc_desc.store([offs_cm, offs_cn + BLOCK_SIZE_N // 2], c1)
+        else:
+            c = accumulator.to(ACC_TYPE)
+            acc_desc.store([offs_cm, offs_cn], c)
