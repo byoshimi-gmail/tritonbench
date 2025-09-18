@@ -78,3 +78,16 @@ def fa3_paper_inputs(dtype, device) -> Generator:
         yield _generated_qkv_inputs(
             shape=(BATCH, H, H, N_CTX, N_CTX, D_HEAD), dtype=dtype, device=device
         )
+
+
+def sweep_inputs(dtype, device) -> Generator:
+    D = 128
+    batch_sizes = [2**i for i in range(6)]
+    num_heads = [5, 8, 16, 24]
+    seqlen = [512 * (2**i) for i in range(6)]
+    for B in batch_sizes:
+        for H in num_heads:
+            for S in seqlen:
+                yield _generated_qkv_inputs(
+                    shape=(B, H, H, S, S, D), dtype=dtype, device=device
+                )

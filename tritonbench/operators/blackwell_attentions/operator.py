@@ -87,16 +87,13 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
-from .generate_inputs import customized_inputs, fa3_paper_inputs
+from .generate_inputs import customized_inputs, fa3_paper_inputs, sweep_inputs
 
 HAS_CUDA_124 = (
     torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.4"
 )
 
 IS_B200 = is_cuda() and "B200" in get_nvidia_gpu_model()
-
-CUSTOMIZED_SHAPES = "CUSTOMIZED_SHAPES"
-FA3_PAPER_SHAPES = "FA3_PAPER_SHAPES"
 
 
 def parse_op_args(args: List[str]):
@@ -128,8 +125,8 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--input-types",
         type=str,
-        default=CUSTOMIZED_SHAPES,
-        choices=[CUSTOMIZED_SHAPES, FA3_PAPER_SHAPES],
+        default="CUSTOMIZED_SHAPES",
+        choices=["CUSTOMIZED_SHAPES", "FA3_PAPER_SHAPES", "SWEEP_SHAPES"],
         help="specify input types",
     )
     return parser.parse_args(args)
@@ -431,7 +428,11 @@ class Operator(BenchmarkOperator):
                 dtype=self.dtype,
                 device=self.device,
             )
-
+        elif self.input_types == "SWEEP_SHAPES":
+            return sweep_inputs(
+                dtype=self.dtype,
+                device=self.device,
+            )
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 
