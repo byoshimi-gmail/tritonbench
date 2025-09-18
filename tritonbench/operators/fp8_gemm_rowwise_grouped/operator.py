@@ -157,14 +157,7 @@ HAS_CUBLAS = False  # TODO: add cublas kernel
 HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
 
-# Try to import Triton GEMM module
-try:
-    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-        get_fp8_constants as get_fp8_constants,
-    )
-except (ImportError, AssertionError):
-    # If import fails, set HAS_TRITON to False
-    HAS_TRITON = False
+from tritonbench.utils.fp8_utils import get_fp8_constants
 
 # Try to import Triton grouped GEMM module
 try:

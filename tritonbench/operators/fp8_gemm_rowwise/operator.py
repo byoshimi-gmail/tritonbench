@@ -69,9 +69,10 @@ HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
 HAS_CUBLAS = False
 
+from tritonbench.utils.fp8_utils import get_fp8_constants
+
 try:
     from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-        get_fp8_constants as get_fp8_constants,
         matmul_fp8_row as triton_fp8_row,
     )
 

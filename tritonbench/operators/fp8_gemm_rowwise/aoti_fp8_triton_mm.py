@@ -4,11 +4,9 @@
 import torch
 import triton
 import triton.language as tl
-
-from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-    get_fp8_constants as get_fp8_constants,
-)
 from triton import Config
+
+from tritonbench.utils.fp8_utils import get_fp8_constants
 
 FP8_DTYPE, _, _, _ = get_fp8_constants()
 E4M3_MAX_POS: float = torch.finfo(FP8_DTYPE).max
