@@ -785,7 +785,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         if self._num_inputs > self._available_num_inputs:
             self._num_inputs = self._available_num_inputs
 
-    def _get_bm_func(self, bm_func_name: str):
+    def get_bm_func(self, bm_func_name: str) -> Callable:
         fwd_fn_lambda = getattr(self, bm_func_name, None)
         assert callable(fwd_fn_lambda), (
             f"Could not find benchmark {bm_func_name} registered in {self.name}. "
@@ -1349,7 +1349,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             extra_metrics=_init_extra_metrics(),
         )
         try:
-            fn = self._get_bm_func(fn_name)
+            fn = self.get_bm_func(fn_name)
             if baseline:
                 self.baseline_fn = fn
             if {"latency", "tflops", "gbps", "speedup", "compile_time"} & set(
@@ -2007,7 +2007,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             total_flops = flop_counter.get_total_flops()
             return total_flops
 
-        fn = self._get_bm_func(fn_name)
+        fn = self.get_bm_func(fn_name)
         if fn not in self._op_flops:
             self._op_flops[fn] = _get_flops(self, fn)
         op_flops = self._op_flops[fn]
