@@ -136,7 +136,7 @@ def decorate_benchmark_data(
 
     repo_locs = {
         "tritonbench": REPO_PATH,
-        "triton": os.environ.get("TRITONBENCH_TRITON_REPO", "unknown"),
+        "triton": os.environ.get("TRITONBENCH_TRITON_INSTALL_DIR", "unknown"),
         "pytorch": os.environ.get("TRITONBENCH_PYTORCH_REPO_PATH", "unknown"),
     }
     aggregated_obj = {
