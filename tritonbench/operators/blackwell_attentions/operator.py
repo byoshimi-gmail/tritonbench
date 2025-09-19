@@ -67,6 +67,7 @@ except (ImportError, IOError, AttributeError):
 try:
     import xformers  # @manual=//fair/xformers:xformers
     import xformers.ops.fmha as xformers_fmha  # @manual=//fair/xformers:xformers
+    from xformers.ops.fmha import MemoryEfficientAttentionCutlassBlackwellOp
 
     from ..flash_attention.test_fmha_utils import permute_qkv
 
@@ -316,11 +317,11 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
-        need_gradient = not (self.mode == BenchmarkMode.FWD_NO_GRAD)
         fhma_input = self.xformers_preprocess(q, k, v)
-        xformers_cutlass_fhma = xformers.ops.fmha.cutlass_blackwell.FwOp
-        return lambda: xformers_cutlass_fhma().apply(
-            fhma_input, needs_gradient=need_gradient
+
+        return lambda: xformers.ops.fmha._memory_efficient_attention(
+            fhma_input,
+            op=MemoryEfficientAttentionCutlassBlackwellOp,
         )
 
     @register_benchmark(enabled=HAS_XFORMERS, fwd_only=True)
