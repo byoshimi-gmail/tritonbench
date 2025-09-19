@@ -236,17 +236,7 @@ def _do_bench_profiler(
         "with_stack": False,
     }
 
-    for _ in range(n_profiler_runs):
-        # Profile execution
-        with torch.profiler.profile(**profiler_config) as prof:
-            if use_cudagraph:
-                g.replay()
-            else:
-                # Execute multiple iterations for regular mode
-                for _ in range(iterations_per_profiler_run):
-                    run_iteration()
-            torch.cuda.synchronize()
-
+    def _trace_handler(prof: torch.profiler.profile) -> None:
         # Collect all kernel execution intervals
         kernel_intervals = []
 
@@ -299,10 +289,23 @@ def _do_bench_profiler(
             )
 
         # Convert to milliseconds and normalize by iterations
-        total_kernel_time_ms = (
+        kernel_time_per_iteration_ms = (
             total_kernel_time_us / 1000.0
         ) / iterations_per_profiler_run
-        all_kernel_times.append(total_kernel_time_ms)
+        all_kernel_times.append(kernel_time_per_iteration_ms)
+
+    for _ in range(n_profiler_runs):
+        # Profile execution
+        with torch.profiler.profile(
+            **profiler_config, on_trace_ready=_trace_handler
+        ) as prof:
+            if use_cudagraph:
+                g.replay()
+            else:
+                # Execute multiple iterations for regular mode
+                for _ in range(iterations_per_profiler_run):
+                    run_iteration()
+            torch.cuda.synchronize()
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
