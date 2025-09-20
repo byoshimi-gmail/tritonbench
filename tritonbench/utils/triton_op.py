@@ -994,6 +994,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 "Caught exception, terminating early with partial results",
                 exc_info=True,
             )
+            if self.tb_args.exit_on_exception:
+                os._exit(1)
             raise
         finally:
             self.output = BenchmarkOperatorResult(

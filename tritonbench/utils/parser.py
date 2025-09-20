@@ -155,6 +155,12 @@ def get_parser(args=None):
         action="store_true",
     )
     parser.add_argument(
+        "--exit-on-exception",
+        action="store_true",
+        default=False,
+        help="Immediately terminate the process if any operator run raises an exception.",
+    )
+    parser.add_argument(
         "--input-id",
         type=int,
         default=0,
