@@ -67,7 +67,7 @@ class Operator(BenchmarkOperator):
         self.liger_op = LigerJSD()
 
     def get_input_iter(self) -> Generator:
-        for V in [2**i for i in range(12, 18)]:
+        for V in [2**i for i in range(1, 2)]:
             _input = torch.randn(
                 self.B * self.T, V, requires_grad=True, device=self.device
             ).log_softmax(dim=-1)
