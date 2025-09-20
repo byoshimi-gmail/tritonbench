@@ -13,6 +13,46 @@ NS_TO_MS = 1e-6
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
 
 
+import os
+from datetime import datetime
+import logging
+log = logging.getLogger(__name__)
+
+# Keep a max of 100,000 alloc/free events in the recorded history
+# leading up to the memory snapshot.
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+def start_record_memory_history() -> None:
+   if not torch.cuda.is_available():
+       log.info("CUDA unavailable. Not recording memory history")
+       return
+
+   log.info("Starting memory snapshot record_memory_history")
+   torch.cuda.memory._record_memory_history(
+       max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+   )
+
+def stop_record_memory_history() -> None:
+   if not torch.cuda.is_available():
+       log.info("CUDA unavailable. Not recording memory history")
+       return
+
+   log.info("Stopping memory snapshot record_memory_history")
+   torch.cuda.memory._record_memory_history(enabled=None)
+
+def export_memory_snapshot(filepath) -> None:
+   if not torch.cuda.is_available():
+       log.info("CUDA unavailable. Not exporting memory snapshot")
+       return
+
+   try:
+       log.info(f"Saving memory snapshot to local file: {filepath}")
+       torch.cuda.memory._dump_snapshot(filepath)
+   except Exception as e:
+       log.info(f"Failed to capture memory snapshot {e}")
+       return
+
+
 class Latency:
     times: List[float]
 
@@ -189,7 +229,15 @@ def _do_bench_profiler(
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
 
     # First, estimate the runtime to calculate iterations
-    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
+    start_record_memory_history()
+    try:
+        estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
+    finally:
+        os.makedirs("memory_snapshots", exist_ok=True)
+        memory_snapshot_file_path = f"memory_snapshots/memory_snapshot_{int(datetime.now().timestamp())}.pickle"
+        export_memory_snapshot(memory_snapshot_file_path)
+        print(f"memory_snapshot_file_path: {memory_snapshot_file_path}")
+        stop_record_memory_history()
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
