@@ -198,7 +198,12 @@ class Operator(BenchmarkOperator):
                 autotune_fallback_to_aten=False,
             ):
                 f = lambda a, b: torch._scaled_mm(
-                    a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=self._get_dtype()
+                    a, 
+                    b, 
+                    scale_a, 
+                    scale_b, 
+                    use_fast_accum=True, 
+                    out_dtype=self._get_dtype()
                 )
                 compiled = torch.compile(f, dynamic=False)
                 compiled(a, b)
