@@ -4,9 +4,12 @@ from typing import Optional
 import torch
 import triton
 import triton.language as tl
-import triton.tools.experimental_descriptor
 
 from tritonbench.utils.env_utils import is_cuda
+from tritonbench.utils.triton_utils import has_experimental_descriptor
+
+if has_experimental_descriptor():
+    import triton.tools.experimental_descriptor
 
 cublas = None
 if is_cuda():
@@ -407,7 +410,9 @@ def matmul_tma_persistent(a, b, c, desc_a, desc_b, desc_c):
 #       - 1 warp = 32 threads, so each thread block requires 128 / 32 = 4 warps
 
 
-def blackwell_persistent_tma(a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_rowwise):
+def blackwell_persistent_tma(
+    a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_rowwise
+):
     configs = matmul_configs_blackwell()
 
     # Check constraints.
@@ -482,6 +487,7 @@ def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M):
     pid_n = (tile_id % num_pid_in_group) // group_size_m
     return pid_m, pid_n
 
+
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def blackwell_persistent_tma_kernel(
     a,
@@ -524,7 +530,9 @@ def blackwell_persistent_tma_kernel(
         acc,
         shape=[M, N],
         strides=[N, 1],
-        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N // 2] if EPILOGUE_SUBTILE else [BLOCK_SIZE_M, BLOCK_SIZE_N],
+        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N // 2]
+        if EPILOGUE_SUBTILE
+        else [BLOCK_SIZE_M, BLOCK_SIZE_N],
     )
 
     tile_id_c = start_pid - NUM_SMS
@@ -539,7 +547,9 @@ def blackwell_persistent_tma_kernel(
         scale_a = tl.load(scale_a_ptr)
         scale_b = tl.load(scale_b_ptr)
 
-    for tile_id in tl.range(start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=WARP_SPECIALIZE):
+    for tile_id in tl.range(
+        start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=WARP_SPECIALIZE
+    ):
         pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         offs_am = pid_m * BLOCK_SIZE_M
         offs_bn = pid_n * BLOCK_SIZE_N
@@ -569,7 +579,9 @@ def blackwell_persistent_tma_kernel(
         accumulator *= a_scales * b_scales
 
         tile_id_c += NUM_SMS
-        pid_m, pid_n = _compute_pid(tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
+        pid_m, pid_n = _compute_pid(
+            tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M
+        )
         offs_cm = pid_m * BLOCK_SIZE_M
         offs_cn = pid_n * BLOCK_SIZE_N
 

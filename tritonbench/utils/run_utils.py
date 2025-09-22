@@ -57,9 +57,9 @@ def get_run_env(
     run_env["pytorch_commit"] = torch.version.git_version
     # we assume Tritonbench CI will properly set Triton commit hash in env
     run_env["triton_commit"] = os.environ.get(
-        "TRITONBENCH_TRITON_MAIN_COMMIT", "unknown"
+        "TRITONBENCH_TRITON_COMMIT_HASH", get_current_hash(repo_locs["triton"])
     )
-    run_env["tritonbench_commit"] = get_current_hash(REPO_PATH)
+    run_env["tritonbench_commit"] = get_current_hash(repo_locs["tritonbench"])
     for repo in ["triton", "pytorch", "tritonbench"]:
         repo_loc = repo_locs.get(repo, None)
         if not run_env[f"{repo}_commit"] == "unknown" and repo_loc:
@@ -98,15 +98,19 @@ def get_github_env() -> Dict[str, str]:
     return out
 
 
-def run_config(config_file: str):
+def run_config(config_file: str, args: List[str]):
     assert Path(config_file).exists(), f"Config file {config_file} must exist."
     with open(config_file, "r") as fp:
         config = yaml.safe_load(fp)
     for benchmark_name in config:
         benchmark_config = config[benchmark_name]
         op_name = benchmark_config["op"]
-        op_args = benchmark_config["args"].split(" ")
+        op_args = benchmark_config["args"].split(" ") + args
         env_string = benchmark_config.get("envs", None)
+        disabled = benchmark_config.get("disabled", False)
+        if disabled:
+            logger.info(f"Skipping disabled benchmark {benchmark_name}.")
+            continue
         extra_envs = {}
         if env_string:
             for env_part in env_string.split(" "):

@@ -155,6 +155,12 @@ def get_parser(args=None):
         action="store_true",
     )
     parser.add_argument(
+        "--exit-on-exception",
+        action="store_true",
+        default=False,
+        help="Immediately terminate the process if any operator run raises an exception.",
+    )
+    parser.add_argument(
         "--input-id",
         type=int,
         default=0,
@@ -288,9 +294,9 @@ def get_parser(args=None):
         help="Configuration B for A/B testing. Specify operator-specific arguments as a string. "
         "Example: '--side-b \"--dynamic\"'",
     )
+    parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
 
     if is_fbcode():
-        parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
         parser.add_argument(
             "--production-shapes",
             action="store_true",
