@@ -7,6 +7,7 @@ from tritonbench.utils.env_utils import is_hip
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
+    Mode,
     register_benchmark,
     register_x_val,
 )
@@ -89,36 +90,52 @@ class Operator(BenchmarkOperator):
         for H in H_values:
             x_shape = (self.M, H)
             _input = torch.randn(x_shape, dtype=self.dtype, device=self.device)
-            yield H, _input
+            if self.mode in (Mode.BWD, Mode.FWD_BWD):
+                _input.requires_grad_()
+
+            weight = torch.ones(H, dtype=self.dtype, device=self.device)
+            yield H, _input, weight
 
     @register_benchmark(baseline=True)
-    def llama_rms(self, H, input) -> Callable:
-        self.llama_rms_op = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        return lambda: self.llama_rms_op(input)
+    def llama_rms(self, H, input, weight) -> Callable:
+        module = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        with torch.no_grad():
+            module.weight.copy_(weight.to(module.weight.dtype))
+        self.llama_rms_op = module
+        return lambda: module(input)
 
     @register_benchmark(enabled=LigerRMSNorm is not None)
-    def liger_rms(self, H, input) -> Callable:
-        self.liger_rms_op = LigerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        return lambda: self.liger_rms_op(input)
+    def liger_rms(self, H, input, weight) -> Callable:
+        module = LigerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        with torch.no_grad():
+            module.weight.copy_(weight.to(module.weight.dtype))
+        self.liger_rms_op = module
+        return lambda: module(input)
 
     @register_benchmark(enabled=QuackRMSNorm)
-    def quack_rms(self, H, input) -> Callable:
-        self.quack_rms_op = QuackRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        return lambda: self.quack_rms_op(input)
+    def quack_rms(self, H, input, weight) -> Callable:
+        module = QuackRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        with torch.no_grad():
+            module.weight.copy_(weight.to(module.weight.dtype))
+        self.quack_rms_op = module
+        return lambda: module(input)
 
     @register_benchmark()
-    def torch_compile_rms(self, H, input) -> Callable:
-        if self.llama_rms_op is None:
-            self.llama_rms_op = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(
-                self.device
-            )
-        compiled = torch.compile(self.llama_rms_op, mode="max-autotune-no-cudagraphs")
+    def torch_compile_rms(self, H, input, weight) -> Callable:
+        module = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        with torch.no_grad():
+            module.weight.copy_(weight.to(module.weight.dtype))
+        self.llama_rms_op = module
+        compiled = torch.compile(module, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
 
     @register_benchmark(enabled=is_hip() and HAS_AITER)
-    def aiter(self, H, input) -> Callable:
-        self.aiter_rms_op = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        return lambda: self.aiter_rms_op(input)
+    def aiter(self, H, input, weight) -> Callable:
+        module = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        with torch.no_grad():
+            module.weight.copy_(weight.to(module.weight.dtype))
+        self.aiter_rms_op = module
+        return lambda: module(input)
 
     @register_x_val(label="(M, H)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
