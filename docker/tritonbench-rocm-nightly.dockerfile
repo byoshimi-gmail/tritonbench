@@ -49,3 +49,22 @@ RUN cd /workspace/tritonbench && \
 # Install Tritonbench
 RUN cd /workspace/tritonbench && \
     bash .ci/tritonbench/install.sh
+
+
+# Install PyTorch source
+RUN cd /workspace/tritonbench && \
+    bash .ci/tritonbench/install-pytorch-source.sh
+
+
+# Build triton-main conda env
+RUN cd /workspace/tritonbench && \
+    bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
+        --repo triton-lang/triton --commit main --side single \
+        --install-dir /workspace/triton-main
+
+
+# Output setup script for inspection
+RUN cat "${SETUP_SCRIPT}"
+
+# Set entrypoint
+CMD ["bash", "/workspace/tritonbench/docker/entrypoint.sh"]
