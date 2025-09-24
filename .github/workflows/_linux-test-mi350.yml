@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 240
     environment: docker-s3-upload
     env:
-      SETUP_SCRIPT: "/workspace/setup_instance.sh"
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
       CONDA_ENV: ${{ inputs.conda_env }}
     steps:
@@ -35,6 +34,7 @@ jobs:
 
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e CONDA_ENV \
             --ipc=host \
             --tty \
             --detach \
