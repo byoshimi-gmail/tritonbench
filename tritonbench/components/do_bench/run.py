@@ -241,7 +241,9 @@ def _do_bench_profiler(
         kernel_intervals = []
 
         # Get raw function events and collect time intervals
-        for evt in prof.events():
+        events = list(prof.events())
+
+        for evt in events:
             # Check for CUDA kernel events, excluding cache clear kernel
             if (
                 evt.device_type == torch.autograd.DeviceType.CUDA
@@ -282,10 +284,12 @@ def _do_bench_profiler(
             total_kernel_time_us = sum(end - start for start, end in merged_intervals)
         else:
             # No kernel events found - this likely indicates an issue
+            event_dump = "\n".join(repr(evt) for evt in events) or "<no events recorded>"
             raise RuntimeError(
                 "No CUDA kernel events found in profiler trace. "
                 "This may indicate the function is not executing any GPU kernels, "
-                "or there's an issue with profiler event collection."
+                "or there's an issue with profiler event collection. "
+                f"Profiler events:\n{event_dump}"
             )
 
         # Convert to milliseconds and normalize by iterations
@@ -306,6 +310,7 @@ def _do_bench_profiler(
                 for _ in range(iterations_per_profiler_run):
                     run_iteration()
             torch.cuda.synchronize()
+            time.sleep(0.1)  # Ensure profiler flushes events
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
