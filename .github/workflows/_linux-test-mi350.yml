@@ -50,7 +50,3 @@ jobs:
             set -eux
             bash ./.ci/tritonbench/test-gpu.sh
           "
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
