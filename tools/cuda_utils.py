@@ -7,12 +7,16 @@ from pathlib import Path
 from .torch_utils import install_pytorch_nightly
 
 # defines the default CUDA version to compile against
-DEFAULT_CUDA_VERSION = "12.8"
+DEFAULT_CUDA_VERSION = "13.0"
 
 CUDA_VERSION_MAP = {
     "12.8": {
         "pytorch_url": "cu128",
         "jax": "jax[cuda12]",
+    },
+    "13.0": {
+        "pytorch_url": "cu130",
+        "jax": "jax[cuda13]",
     },
 }
 
