@@ -1,6 +1,5 @@
 # Build ROCM base docker file
-# We are not building AMD CI in a short term, but this could be useful
-# for sharing benchmark results with AMD.
+# Base image is rocm/pytorch:latest (on top of ubuntu 24.04)
 ARG BASE_IMAGE=rocm/pytorch:latest
 
 FROM ${BASE_IMAGE}
