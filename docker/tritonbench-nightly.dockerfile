@@ -34,6 +34,10 @@ RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pyt
     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
 RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
+# Checkout TritonBench and submodules
+RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
+    https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
+
 # Install and setup miniconda
 RUN cd /workspace/tritonbench && bash ./.ci/conda/install.sh
 
@@ -47,10 +51,6 @@ export LD_LIBRARY_PATH=\${CUDA_HOME}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PAT
 export LIBRARY_PATH=\${CUDA_HOME}/lib64\${LIBRARY_PATHPATH:+:\${LIBRARY_PATHPATH}}\n" >> /workspace/setup_instance.sh
 
 RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
-
-# Checkout TritonBench and submodules
-RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
-    https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
 
 # Setup conda env and CUDA
 RUN cd /workspace/tritonbench && \
