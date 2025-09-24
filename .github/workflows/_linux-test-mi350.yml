@@ -16,9 +16,41 @@ jobs:
     environment: docker-s3-upload
     env:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
+      DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
       CONDA_ENV: ${{ inputs.conda_env }}
     steps:
       - name: Checkout Tritonbench
         uses: actions/checkout@v3
         with:
           submodules: recursive
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+      - name: Test Tritonbench
+        run: |
+          set -eux
+          
+          GPU_FLAG="--gpus all"
+
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            --ipc=host \
+            --tty \
+            --detach \
+            --security-opt seccomp=unconfined \
+            --shm-size=32g \
+            --cap-add=SYS_PTRACE \
+            -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
+            -w /tmp/workspace \
+            "${DOCKER_IMAGE}"
+          )
+
+          docker exec -t -w /tmp/workspace "${container_name}" bash -c "
+            set -eux
+            bash ./.ci/tritonbench/test-gpu.sh
+          "
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
