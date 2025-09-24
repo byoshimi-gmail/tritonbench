@@ -993,7 +993,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 proton.finalize()
         except (KeyboardInterrupt, Exception):
             logger.warning(
-                "Caught exception, terminating early with partial results",
+                "Caught exception, terminating early with partial results. self.tb_args.exit_on_exception: %s",
+                self.tb_args.exit_on_exception,
                 exc_info=True,
             )
             if self.tb_args.exit_on_exception:
