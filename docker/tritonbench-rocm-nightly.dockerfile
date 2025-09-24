@@ -13,16 +13,24 @@ ARG FORCE_DATE=${FORCE_DATE}
 
 RUN mkdir -p /workspace; touch "${SETUP_SCRIPT}"
 
-RUN echo "\
-. /opt/conda/etc/profile.d/conda.sh\n\
-conda activate base\n\
-export CONDA_HOME=/opt/conda\n" > "${SETUP_SCRIPT}"
-
-RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
+
+
+# Install and setup miniconda
+RUN cd /workspace/tritonbench && bash ./.ci/conda/install.sh
+
+
+# Setup SETUP_SCRIPT
+RUN echo "\
+. /workspace/miniconda3/etc/profile.d/conda.sh\n\
+conda activate base\n\
+export CONDA_HOME=/workspace/miniconda3\n" > "${SETUP_SCRIPT}"
+
+RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
+
 
 # Setup conda env
 RUN cd /workspace/tritonbench && \

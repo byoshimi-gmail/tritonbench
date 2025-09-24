@@ -34,16 +34,8 @@ RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pyt
     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
 RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
-# Install miniconda
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/Miniconda3-latest-Linux-x86_64.sh
-RUN cd /workspace && \
-    chmod +x Miniconda3-latest-Linux-x86_64.sh && \
-    bash ./Miniconda3-latest-Linux-x86_64.sh -b -u -p /workspace/miniconda3
-
-# Test activate miniconda
-RUN . /workspace/miniconda3/etc/profile.d/conda.sh && \
-    conda activate base && \
-    conda init && conda tos accept
+# Install and setup miniconda
+RUN cd /workspace/tritonbench && bash ./.ci/conda/install.sh
 
 RUN echo "\
 . /workspace/miniconda3/etc/profile.d/conda.sh\n\
