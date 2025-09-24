@@ -310,10 +310,8 @@ def _do_bench_profiler(
                 for _ in range(iterations_per_profiler_run):
                     run_iteration()
             torch.cuda.synchronize()
-            time.sleep(10)  # Ensure profiler flushes events
             prof.step()
         torch.cuda.synchronize()
-        time.sleep(10)  # Ensure profiler flushes events
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
