@@ -8,18 +8,19 @@ import importlib.util
 
 
 def tritonparse_init(tritonparse_log_path):
-    """Initializes TritonParse structured logging.
+    """
+    Initializes TritonParse structured logging.
 
-        This function sets up the logging hook to capture Triton compilation
-        and launch events. The logs will be stored in a 'raw_logs' subdirectory
-        within the specified path. For more details, see:
-        https://github.com/pytorch-labs/tritonparse
+    This function sets up the logging hook to capture Triton compilation
+    and launch events. The logs will be stored in a 'raw_logs' subdirectory
+    within the specified path. For more details, see:
+    https://github.com/pytorch-labs/tritonparse
 
-        Args:
-            tritonparse_log_path (str or None): The path to the directory where
-                TritonParse logs should be stored. Raw logs will be saved in
-                {tritonparse_log_path}/raw_logs/. If None, this function
-                does nothing.
+    Args:
+        tritonparse_log_path (str or None): The path to the directory where
+            TritonParse logs should be stored. Raw logs will be saved in
+            {tritonparse_log_path}/raw_logs/. If None, this function
+            does nothing.
     """
     if tritonparse_log_path is not None:
         # capture errors but don't fail the entire script
@@ -42,7 +43,8 @@ def tritonparse_init(tritonparse_log_path):
 
 
 def tritonparse_parse(tritonparse_log_path):
-    """Parses the generated TritonParse logs.
+    """
+    Parses the generated TritonParse logs.
 
     This function processes the raw logs from the 'raw_logs' subdirectory
     and creates unified, structured trace files in the 'parsed_logs'
