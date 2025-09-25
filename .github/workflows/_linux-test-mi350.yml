@@ -30,7 +30,7 @@ jobs:
         run: |
           set -eux
           
-          GPU_FLAG="--gpus all"
+          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined "
 
           container_name=$(docker run \
             ${GPU_FLAG:-} \
