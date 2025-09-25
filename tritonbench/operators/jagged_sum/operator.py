@@ -218,10 +218,9 @@ class Operator(BenchmarkOperator):
                 batch_size, max_seq_len, _ = dense_0.shape
                 yield (nested_tensor, batch_size, 1, max_seq_len, 0.0)
 
-    @register_metric()
-    def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
-        output = fn()["output"]
-        baseline_output = baseline_fn()["output"]
+    def _get_accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
+        output = fn()
+        baseline_output = baseline_fn()
         return torch.allclose(
             output, baseline_output, atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE
         )
