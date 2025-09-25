@@ -1,3 +1,4 @@
+import logging
 import statistics
 import time
 from functools import partial
@@ -6,6 +7,9 @@ from typing import List, Optional
 import torch
 import triton
 from torch._inductor.runtime.benchmarking import benchmarker
+
+
+logger = logging.getLogger(__name__)
 
 NS_TO_MS = 1e-6
 
@@ -329,13 +333,30 @@ def _do_bench_profiler(
             session_times = _run_profiler_session()
             if session_times:
                 all_kernel_times = session_times
+                logger.info(
+                    "Profiler attempt %d/%d captured %d kernel timing samples",
+                    attempt + 1,
+                    max_profiler_attempts,
+                    len(session_times),
+                )
                 break
             last_error = RuntimeError("Profiler returned empty kernel timing list")
+            logger.warning(
+                "Profiler attempt %d/%d returned no kernel timings",
+                attempt + 1,
+                max_profiler_attempts,
+            )
             all_kernel_times = None
         except RuntimeError as exc:
             if "No CUDA kernel events found in profiler trace" not in str(exc):
                 raise
             last_error = exc
+            logger.warning(
+                "Profiler attempt %d/%d failed to capture kernels: %s",
+                attempt + 1,
+                max_profiler_attempts,
+                exc,
+            )
             all_kernel_times = None
         torch.cuda.synchronize()
         time.sleep(10)

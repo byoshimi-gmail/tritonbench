@@ -1404,6 +1404,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         )
         try:
             fn = self._get_bm_func(fn_name)
+            logger.info(
+                "Running implementation %s for benchmark %s",
+                getattr(fn, "_name", fn_name),
+                self.name,
+            )
             if baseline:
                 self.baseline_fn = fn
             if {"latency", "tflops", "gbps", "speedup", "compile_time"} & set(
