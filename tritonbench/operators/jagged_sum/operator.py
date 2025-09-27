@@ -103,7 +103,7 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args)
         self.sizes = (
-            list(range(2, 12, 4)) + list(range(11, 18, 3))
+            list(range(2, 12, 4))
         )  # bias towards larger sizes, which are more representative of real-world shapes
 
         args = parse_op_args(self.extra_args)

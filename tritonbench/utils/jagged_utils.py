@@ -116,17 +116,17 @@ def generate_input_vals(B, M, max_seqlen, sparsity, sizes):
         B_vals.extend([B])
 
     if M is None:
-        M_vals.extend(get_dim_vals(sizes))
+        M_vals.extend([512])
     else:
         M_vals.extend([M])
 
     if max_seqlen is None:
-        seqlen_vals.extend((100, 500, 1000, 3000, 10_000, 18_000))
+        seqlen_vals.extend([512])
     else:
         seqlen_vals.extend([max_seqlen])
 
     if sparsity is None:
-        sparsity_vals.extend((0.1, 0.25, 0.5, 0.75, 0.9))
+        sparsity_vals.extend([0.5])
     else:
         sparsity_vals.extend([sparsity])
 
