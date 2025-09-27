@@ -126,7 +126,7 @@ def generate_input_vals(B, M, max_seqlen, sparsity, sizes):
         seqlen_vals.extend([max_seqlen])
 
     if sparsity is None:
-        sparsity_vals.extend([0.5])
+        sparsity_vals.extend((0.1, 0.25, 0.5, 0.75, 0.9))
     else:
         sparsity_vals.extend([sparsity])
 
