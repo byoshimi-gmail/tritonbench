@@ -1481,7 +1481,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 )
             return True
         except Exception as e:
-            print(f"Exception during accuracy check: {e}", file=sys.stderr)
+            logger.warning(f"Exception during accuracy check: {e}")
             return False
 
     def _do_bench(
