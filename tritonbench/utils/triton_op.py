@@ -691,6 +691,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     is_compute_bound = True
     # reset dynamo to avoid errors like https://github.com/meta-pytorch/tritonbench/issues/90
     reset_dynamo = True
+    # Hook called after each input benchmark completes
+    benchmark_post_hook: Optional[Callable[[Any], None]] = None
 
     """
     A base class for adding operators to torch benchmark.
@@ -1789,6 +1791,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if not self.tb_args.keep_going:
                 raise
             metrics.error_msg = str(e)
+
+        if self.benchmark_post_hook:
+            self.benchmark_post_hook(fn_name, metrics)
+
         return metrics
 
     def do_bench_cudagraph_mem(
