@@ -12,6 +12,8 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
+from . import fused_triton
+
 try:
     from liger_kernel.transformers.rms_norm import LigerRMSNorm
 except ModuleNotFoundError:
@@ -139,6 +141,10 @@ class Operator(BenchmarkOperator):
         self.llama_rms_op = module
         compiled = torch.compile(module, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
+
+    @register_benchmark()
+    def triton_fused_rmsnorm(self, H, input, weight) -> Callable:
+        return lambda: fused_triton.rms_norm(input, H, weight, self.eps)
 
     @register_benchmark(enabled=is_hip() and HAS_AITER)
     def aiter(self, H, input, weight) -> Callable:
