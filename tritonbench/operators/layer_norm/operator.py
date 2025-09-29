@@ -14,7 +14,7 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
-from . import tutorial
+from . import fused_triton, tutorial
 
 
 def parse_op_args(args: List[str]):
@@ -65,6 +65,11 @@ class Operator(BenchmarkOperator):
     @register_benchmark()
     def triton_layer_norm(self, *args):
         return lambda: tutorial.layer_norm(*args)
+
+    @register_benchmark()
+    def triton_fused_layer_norm(self, *args):
+        # Fused bwd Triton Layer Norm
+        return lambda: fused_triton.layer_norm(*args)
 
     @register_benchmark(baseline=True)
     def torch_layer_norm(self, *args):
