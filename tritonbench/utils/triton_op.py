@@ -1480,8 +1480,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     atol=self.tb_args.atol,
                 )
             return True
-        except Exception:
-            # either the output tensor or the grad tensor does not match
+        except Exception as e:
+            print(f"Exception during accuracy check: {e}", file=sys.stderr)
             return False
 
     def _do_bench(
