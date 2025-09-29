@@ -137,6 +137,12 @@ def get_parser(args=None):
         help="Specify one or multiple kernel implementations to skip.",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force all --only benchmarks to run, despite possibly not being enabled.",
+    )
+    parser.add_argument(
         "--only-match-mode",
         default="exact",
         choices=["exact", "prefix-with-baseline"],

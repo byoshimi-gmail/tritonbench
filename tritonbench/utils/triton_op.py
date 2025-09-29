@@ -759,6 +759,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             BASELINE_BENCHMARKS[self.name] = self.tb_args.baseline
         self._only = _split_params_by_comma(self.tb_args.only)
         self._skip = _split_params_by_comma(self.tb_args.skip)
+        self._force = self.tb_args.force
         self._only_match_mode = self.tb_args.only_match_mode
         # Parse input_id as comma-separated list - always store as a list
         if "," in self.tb_args.input_id:
@@ -1031,9 +1032,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                                     benchmarks.append(bm)
                                     break
                     else:  # exact mode (default)
-                        benchmarks = list(
+                        only_benchmarks = list(
                             dict.fromkeys(self._only)
                         )  # remove duplicates while preserving order
+                        enabled_benchmarks = find_enabled_benchmarks(
+                            self.mode, REGISTERED_BENCHMARKS[self.name], []
+                        )
+                        benchmarks = []
+                        for bm in only_benchmarks:
+                            if bm in enabled_benchmarks or self._force:
+                                benchmarks.append(bm)
+                            else:
+                                logger.warning(
+                                    f"Skipping benchmark {bm} since it is not enabled"
+                                )
                 else:
                     benchmarks = find_enabled_benchmarks(
                         self.mode, REGISTERED_BENCHMARKS[self.name], self._skip
