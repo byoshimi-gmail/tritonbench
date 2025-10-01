@@ -78,6 +78,24 @@ try:
 except (ImportError, IOError, AttributeError, TypeError):
     HAS_XFORMERS = False
 
+
+try:
+    # @manual=//triton:triton
+    import triton.language.extra.tlx as tlx  # type: ignore
+
+    HAS_TLX = True
+except ImportError:
+    # suppress type checking errors
+    tlx = None
+
+    HAS_TLX = False
+
+if HAS_TLX:
+    from tritonbench.kernels.tlx_attention_ws_pipelined import (
+        attention as tlx_blackwell_fwd,
+    )
+
+
 from typing import Any, Generator, List
 
 from tritonbench.utils.input import input_filter
@@ -129,9 +147,7 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--pt2-sdpa", action="store_true", help="Compile SDPA with PT2."
     )
-    parser.add_argument(
-        "--sm-scale", type=Optional[float], default=None, help="softmax scale"
-    )
+    parser.add_argument("--sm-scale", type=float, default=None, help="softmax scale")
     parser.add_argument(
         "--input-types",
         type=str,
@@ -486,6 +502,26 @@ class Operator(BenchmarkOperator):
         return lambda: gluon_blackwell_persistent_fwd(
             q, k, v, self.causal, self.sm_scale
         )
+
+    # Only works with triton beta, forward only.
+    @register_benchmark(enabled=False)
+    def tlx_blackwell_ws_pipelined_fwd(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: tlx_blackwell_fwd(q, k, v, self.sm_scale, False)
+
+    # Only works with triton beta, forward only.
+    @register_benchmark(enabled=False)
+    def tlx_blackwell_ws_pipelined_persistent_fwd(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: tlx_blackwell_fwd(q, k, v, self.sm_scale, True)
 
     @register_metric(x_only=True)
     def flops(
