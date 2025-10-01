@@ -1741,13 +1741,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     self._latency_with_compile_in_task = metrics.extra_metrics[
                         "_compile_time_in_task"
                     ]
-            if "_ncu_trace_in_task" in self.required_metrics:
+            if "single_run_in_task" in self.required_metrics:
                 assert (
-                    self.required_metrics == ["_ncu_trace_in_task"]
+                    self.required_metrics == ["single_run_in_task"]
                     and len(self._only) == 1
                     and (self._cur_input_id is not None)
                 ), (
-                    "_ncu_trace_in_task must be measured by itself. "
+                    "single_run_in_task must be measured by itself. "
                     f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
                 )
                 from tritonbench.components.ncu import do_bench_in_task
@@ -1757,26 +1757,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     grad_to_none=self.get_grad_to_none(self.example_inputs),
                     range_name=_RANGE_NAME,
                 )
-                metrics.extra_metrics["_ncu_trace_in_task"] = "success"
-            if "_nsys_rep_in_task" in self.required_metrics:
-                assert (
-                    self.required_metrics == ["_nsys_rep_in_task"]
-                    and len(self._only) == 1
-                    and (self._cur_input_id is not None)
-                ), (
-                    "_nsys_rep_in_task must be measured by itself. "
-                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
-                )
-                from tritonbench.components.ncu import do_bench_in_task
-
-                do_bench_in_task(
-                    fn=fn,
-                    grad_to_none=self.get_grad_to_none(self.example_inputs),
-                    range_name=_RANGE_NAME,
-                    warmup=True,
-                    use_cuda_profiler_range=True,
-                )
-                metrics.extra_metrics["_nsys_rep_in_task"] = "success"
+                metrics.extra_metrics["single_run_in_task"] = "success"
             if self.tb_args.export:
                 export_data(
                     x_val=self.get_x_val(self.example_inputs),
@@ -1929,7 +1910,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return op_task_args
 
     def nsys_rep(self, input_id: int, fn_name: str) -> str:
-        op_task_args = self._get_op_task_args(input_id, fn_name, "_nsys_rep_in_task")
+        op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
         nsys_output_dir = self.get_temp_path(fn_name)
         nsys_output_dir.mkdir(parents=True, exist_ok=True)
         ext = ".nsys-rep"
@@ -1971,7 +1952,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 "full",
             ]
         )
-        op_task_args = self._get_op_task_args(input_id, fn_name, "_ncu_trace_in_task")
+        op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
         # Disable DCGM
         disable_dyno_dcgm = [
             "sudo",
@@ -2052,7 +2033,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return str(ncu_output_file.resolve())
 
     def att_trace(self, input_id: int, fn_name: str) -> str:
-        op_task_args = self._get_op_task_args(input_id, fn_name, "_ncu_trace_in_task")
+        op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
         att_output_dir = self.get_temp_path(fn_name)
         att_trace_dir = launch_att(att_output_dir, op_task_args)
         return att_trace_dir
