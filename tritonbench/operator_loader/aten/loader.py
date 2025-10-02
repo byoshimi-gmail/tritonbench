@@ -22,8 +22,7 @@ class AtenOperator(BenchmarkOperator):
             self.tb_args.input_loader = self.aten_op_input
 
     def get_input_iter(self) -> Generator:
-        for inp in self._get_input_iter():
-            yield inp
+        raise NotImplementedError("get_input_iter is not implemented for AtenOperator.")
 
     def eager(self, *input):
         args, kwargs = input
