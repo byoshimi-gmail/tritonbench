@@ -684,6 +684,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     DEFAULT_METRICS = ["latency"]
     required_metrics: List[str]
     _cur_input_id: Optional[int] = None
+    _cur_backend_name: Optional[str] = None
     _input_iter: Optional[Generator] = None
     extra_args: List[str] = []
     example_inputs: Any = None
@@ -980,6 +981,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
             current_pos = 0
             for input_id in input_id_range:
+                self._cur_backend_name = None
                 # Skip to the correct position if there are gaps
                 while current_pos < input_id:
                     self.example_inputs = self.get_example_inputs()
@@ -1078,6 +1080,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
                 # get metrics for for each registered benchmark
                 def _reduce_benchmarks(acc, bm_name: str):
+                    self._cur_backend_name = bm_name
                     baseline = (
                         bm_name == BASELINE_BENCHMARKS[self.name]
                         if self.name in BASELINE_BENCHMARKS
@@ -1101,6 +1104,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(
                     _reduce_benchmarks, benchmarks, {}
                 )
+                self._cur_backend_name = None
                 metrics.append((x_val, y_vals))
                 del self.example_inputs  # save some memory
                 if "proton" in self.required_metrics:
@@ -1112,10 +1116,21 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 proton.exit_scope()
                 proton.finalize()
         except (KeyboardInterrupt, Exception):
+            backend_suffix = (
+                f" on backend {self._cur_backend_name}"
+                if self._cur_backend_name is not None
+                else ""
+            )
             logger.warning(
-                "Caught exception, terminating early with partial results",
+                "Caught exception%s, terminating early with partial results",
+                backend_suffix,
                 exc_info=True,
             )
+            if getattr(self, "_cur_input_id", None) is not None:
+                logger.warning(
+                    "Failing input: --input-id %s --num-inputs 1",
+                    self._cur_input_id,
+                )
             if self.tb_args.exit_on_exception:
                 os._exit(1)
             raise
