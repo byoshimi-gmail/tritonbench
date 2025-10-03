@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import torch
 import triton
+import triton.language as tl
 from torch._inductor.runtime.benchmarking import benchmarker
 
 import datetime
@@ -17,6 +18,21 @@ NS_TO_MS = 1e-6
 
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
+
+
+@triton.jit
+def _single_store_triton_kernel(dummy_ptr):
+    """Minimal kernel to capture launch overhead."""
+    pid = tl.program_id(0)
+    tl.store(dummy_ptr + pid, 0)
+
+
+@triton.jit
+def _double_store_triton_kernel(dummy_ptr):
+    """Two-store kernel to estimate per-store runtime."""
+    pid = tl.program_id(0)
+    tl.store(dummy_ptr + pid, 0)
+    tl.store(dummy_ptr + pid + 1, 0)
 
 
 class Latency:
@@ -317,6 +333,89 @@ def _do_bench_profiler(
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
 
 
+def _do_bench_triton_with_overhead(
+    fn, warmup=25, rep=100, grad_to_none=None, quantiles=None, return_mode="mean"
+):
+    """Copy of triton.testing.do_bench with cache-overhead subtraction."""
+    assert return_mode in ["min", "max", "mean", "median", "all"]
+
+    device_interface = triton.runtime.driver.active.get_device_interface()
+
+    fn()
+    device_interface.synchronize()
+
+    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+    device = triton.runtime.driver.active.get_active_torch_device()
+    overhead_buffer = torch.empty((2,), dtype=torch.int32, device=device)
+
+    # Warm the single-cycle kernel to exclude compilation cost.
+    _single_store_triton_kernel[(1,)](overhead_buffer, num_warps=1)
+    _double_store_triton_kernel[(1,)](overhead_buffer, num_warps=1)
+    device_interface.synchronize()
+
+    # Estimate runtime (cache clear + fn) to size warmup/repeat loops.
+    estimate_start = device_interface.Event(enable_timing=True)
+    estimate_end = device_interface.Event(enable_timing=True)
+    estimate_start.record()
+    for _ in range(5):
+        triton.runtime.driver.active.clear_cache(cache)
+        fn()
+    estimate_end.record()
+    device_interface.synchronize()
+    estimate_ms = estimate_start.elapsed_time(estimate_end) / 5
+
+    if estimate_ms == 0:
+        n_warmup = max(1, warmup)
+        n_repeat = max(1, rep)
+    else:
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
+
+    total_start_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+    total_end_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+    single_store_start_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+    single_store_end_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+    double_store_start_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+    double_store_end_events = [device_interface.Event(enable_timing=True) for _ in range(n_repeat)]
+
+    for _ in range(n_warmup):
+        fn()
+    device_interface.synchronize()
+
+    for idx in range(n_repeat):
+        if grad_to_none is not None:
+            for tensor in grad_to_none:
+                tensor.grad = None
+
+        total_start_events[idx].record()
+        triton.runtime.driver.active.clear_cache(cache)
+        fn()
+        total_end_events[idx].record()
+
+        single_store_start_events[idx].record()
+        triton.runtime.driver.active.clear_cache(cache)
+        _single_store_triton_kernel[(1,)](overhead_buffer, num_warps=1)
+        single_store_end_events[idx].record()
+
+        double_store_start_events[idx].record()
+        triton.runtime.driver.active.clear_cache(cache)
+        _double_store_triton_kernel[(1,)](overhead_buffer, num_warps=1)
+        double_store_end_events[idx].record()
+
+    device_interface.synchronize()
+
+    total_times = [start.elapsed_time(end) for start, end in zip(total_start_events, total_end_events)]
+    single_store_times = [start.elapsed_time(end) for start, end in zip(single_store_start_events, single_store_end_events)]
+    double_store_times = [start.elapsed_time(end) for start, end in zip(double_store_start_events, double_store_end_events)]
+
+    per_store_times = [max(double - single, 0.0) for single, double in zip(single_store_times, double_store_times)]
+    overhead_times = [max(single - store, 0.0) for single, store in zip(single_store_times, per_store_times)]
+
+    adjusted_times = [max(total - overhead, 0.0) for total, overhead in zip(total_times, overhead_times)]
+    adjusted_tensor = torch.tensor(adjusted_times, dtype=torch.float)
+    return _summarize_statistics(adjusted_tensor, quantiles, return_mode)
+
+
 def _do_bench_cpu(
     fn, warmup, rep=20, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
@@ -371,7 +470,8 @@ def do_bench_wrapper(
     """Wrapper to triton's do_bench to gain latency.
 
     Args:
-        latency_measure_mode: Either "triton_do_bench" (default) or "inductor_benchmarker" or "profiler"
+        latency_measure_mode: Either "triton_do_bench" (default), "triton_do_bench_with_overhead",
+            "inductor_benchmarker", or "profiler"
     """
     try:
         if device == "cpu":
@@ -400,13 +500,14 @@ def do_bench_wrapper(
                     )
                 )
         else:
-            bench_fn = (
-                _do_bench_profiler
-                if latency_measure_mode == "profiler"
-                else _do_bench_inductor
-                if latency_measure_mode == "inductor_benchmarker"
-                else triton.testing.do_bench
-            )
+            if latency_measure_mode == "profiler":
+                bench_fn = _do_bench_profiler
+            elif latency_measure_mode == "inductor_benchmarker":
+                bench_fn = _do_bench_inductor
+            elif latency_measure_mode == "triton_do_bench_with_overhead":
+                bench_fn = _do_bench_triton_with_overhead
+            else:
+                bench_fn = triton.testing.do_bench
 
             def trace_handler(prof):    
                 username = getpass.getuser()
