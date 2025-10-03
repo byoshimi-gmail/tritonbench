@@ -7,6 +7,12 @@ import torch
 import triton
 from torch._inductor.runtime.benchmarking import benchmarker
 
+import datetime
+import getpass
+import inspect
+import os
+
+
 NS_TO_MS = 1e-6
 
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
@@ -402,15 +408,32 @@ def do_bench_wrapper(
                 else triton.testing.do_bench
             )
 
-            return Latency(
-                times=bench_fn(
+            def trace_handler(prof):    
+                username = getpass.getuser()
+                timestamp = int(datetime.datetime.now().timestamp())
+                trace_path = f"trace_{timestamp}.json"
+
+                prof.export_chrome_trace(trace_path)
+                
+                print(f"GPU trace local file: {trace_path}")
+
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(skip_first=0, wait=0, warmup=0, active=1),
+                on_trace_ready=trace_handler,
+                with_stack=False,
+                record_shapes=True,
+            ) as prof:
+                times = bench_fn(
                     fn,
                     warmup=warmup,
                     rep=rep,
                     return_mode="all",
                     grad_to_none=grad_to_none,
                 )
-            )
+                torch.cuda.synchronize()
+                time.sleep(10)
+                return Latency(times=times)
     except Exception as e:
         if not bypass_fail:
             raise e
