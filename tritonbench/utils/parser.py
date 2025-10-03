@@ -217,8 +217,14 @@ def get_parser(args=None):
     parser.add_argument(
         "--latency-measure-mode",
         default="triton_do_bench",
-        choices=["triton_do_bench", "inductor_benchmarker", "profiler"],
-        help="Method to measure latency: triton_do_bench (default), inductor_benchmarker, profiler.",
+        choices=[
+            "triton_do_bench",
+            "inductor_benchmarker",
+            "profiler",
+            "cudagraph_cache_clear",
+            "queued_wait",
+        ],
+        help="Method to measure latency: triton_do_bench (default), inductor_benchmarker, profiler, cudagraph_cache_clear, queued_wait.",
     )
     parser.add_argument(
         "--isolate",

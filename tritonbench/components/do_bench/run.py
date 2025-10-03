@@ -1,3 +1,6 @@
+import contextlib
+import os
+import signal
 import statistics
 import time
 from functools import partial
@@ -5,12 +8,60 @@ from typing import List, Optional
 
 import torch
 import triton
+import triton.language as tl
 from torch._inductor.runtime.benchmarking import benchmarker
 
 NS_TO_MS = 1e-6
 
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
+
+WAIT_SIGNAL_WATCHDOG_S = 60.0
+# Number of spin-loop iterations for the wait kernel
+# This must be large enough to allow the signal kernel to execute,
+# but not so large as to add excessive overhead.
+# Benchmarking shows 100M iterations takes ~5-20ms on typical GPUs.
+WAIT_LOOP_ITERATIONS = 100_000_000
+
+
+@triton.jit
+def _wait_for_flag(flag_ptr, max_iters: tl.constexpr):
+    # Bounded wait loop - Triton doesn't support infinite while loops reliably
+    # Use atomic operations with proper memory semantics for cross-stream visibility
+    # The loop must complete all iterations since Triton doesn't support break
+    # Note: This adds ~5-20ms overhead but ensures proper synchronization
+    for _ in range(max_iters):
+        val = tl.atomic_add(flag_ptr, 0, sem="acquire", scope="gpu")
+
+
+@triton.jit
+def _signal_flag(flag_ptr):
+    # Use atomic exchange with release semantics to ensure memory visibility
+    tl.atomic_xchg(flag_ptr, 1, sem="release", scope="gpu")
+
+
+@contextlib.contextmanager
+def _watchdog(timeout_s: float):
+    if timeout_s is None or timeout_s <= 0:
+        yield
+        return
+    if os.name == "nt" or not hasattr(signal, "setitimer"):
+        yield
+        return
+
+    def _handler(signum, frame):
+        raise TimeoutError(
+            "wait-signal latency measurement timed out; potential deadlock detected"
+        )
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handler)
+    signal.setitimer(signal.ITIMER_REAL, timeout_s)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 class Latency:
@@ -311,6 +362,72 @@ def _do_bench_profiler(
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
 
 
+def do_bench_wait_signal(
+    fn,
+    rep=20,
+    grad_to_none=None,
+    quantiles=None,
+    return_mode="mean",
+    watchdog_timeout_s: float = WAIT_SIGNAL_WATCHDOG_S,
+):
+    """Benchmark ``fn`` by queueing work behind a Triton wait/signal barrier."""
+
+    assert return_mode in ["min", "max", "mean", "median", "all"]
+
+    device_iface = triton.runtime.driver.active.get_device_interface()
+    measurement_stream = device_iface.Stream()
+    signal_stream = device_iface.Stream()
+    start_event = device_iface.Event(enable_timing=True)
+    end_event = device_iface.Event(enable_timing=True)
+
+    flag = torch.zeros(
+        (1,),
+        dtype=torch.int32,
+        device=triton.runtime.driver.active.get_active_torch_device(),
+    )
+    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+
+    # Warmup run on the measurement stream
+    with device_iface.StreamContext(measurement_stream):
+        fn()
+    measurement_stream.synchronize()
+
+    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
+    n_repeat = 1000 if estimate_ms == 0 else max(1, int(rep / estimate_ms))
+
+    def _clear_grads_only():
+        if grad_to_none is None:
+            return
+        for tensor in grad_to_none:
+            tensor.grad = None
+
+    timings: List[float] = []
+    n_retries = 10
+
+    for _ in range(n_retries):
+        with device_iface.StreamContext(measurement_stream):
+            flag.zero_()
+            _wait_for_flag[(1,)](flag, max_iters=WAIT_LOOP_ITERATIONS, num_warps=1)
+            start_event.record(measurement_stream)
+            for _ in range(n_repeat):
+                _clear_grads_only()
+                cache.zero_()
+                fn()
+            end_event.record(measurement_stream)
+
+        with device_iface.StreamContext(signal_stream):
+            _signal_flag[(1,)](flag, num_warps=1)
+        signal_stream.synchronize()
+
+        with _watchdog(watchdog_timeout_s):
+            end_event.synchronize()
+
+        timings.append(start_event.elapsed_time(end_event) / n_repeat)
+
+    times = torch.tensor(timings, dtype=torch.float)
+    return _summarize_statistics(times, quantiles, return_mode)
+
+
 def _do_bench_cpu(
     fn, warmup, rep=20, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
@@ -365,7 +482,7 @@ def do_bench_wrapper(
     """Wrapper to triton's do_bench to gain latency.
 
     Args:
-        latency_measure_mode: Either "triton_do_bench" (default) or "inductor_benchmarker" or "profiler"
+        latency_measure_mode: One of "triton_do_bench", "inductor_benchmarker", "profiler", "cudagraph_cache_clear", or "queued_wait".
     """
     try:
         if device == "cpu":
@@ -378,10 +495,21 @@ def do_bench_wrapper(
                     grad_to_none=grad_to_none,
                 )
             )
-        elif use_cuda_graphs:
+        elif latency_measure_mode == "queued_wait":
+            return Latency(
+                times=do_bench_wait_signal(
+                    fn,
+                    rep=rep,
+                    return_mode="all",
+                    grad_to_none=grad_to_none,
+                )
+            )
+        elif use_cuda_graphs or latency_measure_mode == "cudagraph_cache_clear":
             with torch.cuda.stream(torch.cuda.Stream()):
                 if latency_measure_mode == "profiler":
                     bench_fn = partial(_do_bench_profiler, warmup=1, use_cudagraph=True)
+                elif latency_measure_mode == "cudagraph_cache_clear":
+                    bench_fn = do_bench_cudagraph_cache_clear
                 else:
                     bench_fn = triton.testing.do_bench_cudagraph
 
