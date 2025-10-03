@@ -311,6 +311,97 @@ def _do_bench_profiler(
     return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
 
 
+def do_bench_cudagraph_cache_clear(
+    fn,
+    rep=20,
+    grad_to_none=None,
+    quantiles=None,
+    return_mode="mean",
+):
+    """Cuda graph benchmark that flushes L2 cache before each timed iteration."""
+
+    assert return_mode in ["min", "max", "mean", "median", "all"]
+
+    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+
+    def _reset_grad_states() -> None:
+        if grad_to_none is None:
+            return
+        for tensor in grad_to_none:
+            tensor.detach_()
+            tensor.requires_grad_(True)
+            tensor.grad = None
+
+    def _clear_grads_only() -> None:
+        if grad_to_none is None:
+            return
+        for tensor in grad_to_none:
+            tensor.grad = None
+
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        cache.zero_()
+        fn()
+        _reset_grad_states()
+
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        total_ms = 0.0
+        n_estimate = 5
+        for _ in range(n_estimate):
+            _clear_grads_only()
+            cache.zero_()
+            start_event.record()
+            fn()
+            end_event.record()
+            stream.synchronize()
+            total_ms += start_event.elapsed_time(end_event)
+        estimate_ms = total_ms / n_estimate if n_estimate else 0.0
+        n_repeat = 1000 if estimate_ms == 0 else max(1, int(rep / estimate_ms))
+
+        g_main = torch.cuda.CUDAGraph()
+        cache.zero_()
+        with torch.cuda.graph(g_main):
+            for _ in range(n_repeat):
+                cache.zero_()
+                _clear_grads_only()
+                fn()
+        stream.synchronize()
+
+        g_cache = torch.cuda.CUDAGraph()
+        cache.zero_()
+        with torch.cuda.graph(g_cache):
+            for _ in range(n_repeat):
+                cache.zero_()
+        stream.synchronize()
+
+        ret = []
+        n_retries = 10
+        start_cache = torch.cuda.Event(enable_timing=True)
+        end_cache = torch.cuda.Event(enable_timing=True)
+        start_main = torch.cuda.Event(enable_timing=True)
+        end_main = torch.cuda.Event(enable_timing=True)
+
+        for _ in range(n_retries):
+            start_cache.record()
+            g_cache.replay()
+            end_cache.record()
+            stream.synchronize()
+            cache_ms = start_cache.elapsed_time(end_cache)
+
+            start_main.record()
+            g_main.replay()
+            end_main.record()
+            stream.synchronize()
+            main_ms = start_main.elapsed_time(end_main)
+
+            ret.append(max(main_ms - cache_ms, 0.0) / n_repeat)
+
+    torch.cuda.synchronize()
+    times = torch.tensor(ret, dtype=torch.float)
+    return _summarize_statistics(times, quantiles, return_mode)
+
+
 def _do_bench_cpu(
     fn, warmup, rep=20, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
@@ -365,7 +456,7 @@ def do_bench_wrapper(
     """Wrapper to triton's do_bench to gain latency.
 
     Args:
-        latency_measure_mode: Either "triton_do_bench" (default) or "inductor_benchmarker" or "profiler"
+        latency_measure_mode: One of "triton_do_bench", "inductor_benchmarker", "profiler", or "cudagraph_cache_clear".
     """
     try:
         if device == "cpu":
@@ -378,10 +469,12 @@ def do_bench_wrapper(
                     grad_to_none=grad_to_none,
                 )
             )
-        elif use_cuda_graphs:
+        elif use_cuda_graphs or latency_measure_mode == "cudagraph_cache_clear":
             with torch.cuda.stream(torch.cuda.Stream()):
                 if latency_measure_mode == "profiler":
                     bench_fn = partial(_do_bench_profiler, warmup=1, use_cudagraph=True)
+                elif latency_measure_mode == "cudagraph_cache_clear":
+                    bench_fn = do_bench_cudagraph_cache_clear
                 else:
                     bench_fn = triton.testing.do_bench_cudagraph
 
