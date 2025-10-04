@@ -1091,14 +1091,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         if self.name in BASELINE_BENCHMARKS
                         else False
                     )
-                    acc[bm_name] = self._do_bench(
-                        input_id=input_id,
-                        fn_name=bm_name,
-                        warmup=warmup,
-                        rep=rep,
-                        quantiles=quantiles,
-                        baseline=baseline,
-                    )
+                    try:
+                        acc[bm_name] = self._do_bench(
+                            input_id=input_id,
+                            fn_name=bm_name,
+                            warmup=warmup,
+                            rep=rep,
+                            quantiles=quantiles,
+                            baseline=baseline,
+                        )
+                    except Exception:
+                        logger.exception(f"Name:{bm_name}\tInput Id:{input_id} failed")
+                        acc[bm_name] = BenchmarkOperatorMetrics(
+                            speedup=0, accuracy=False, extra_metrics=dict()
+                        )
                     if baseline:
                         self.baseline_metrics = acc[bm_name]
                     if sleep:
