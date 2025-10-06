@@ -504,7 +504,7 @@ class Operator(BenchmarkOperator):
         )
 
     # Only works with triton beta, forward only.
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=HAS_TLX)
     def tlx_blackwell_ws_pipelined_fwd(
         self,
         q: torch.Tensor,
@@ -514,7 +514,7 @@ class Operator(BenchmarkOperator):
         return lambda: tlx_blackwell_fwd(q, k, v, self.sm_scale, False)
 
     # Only works with triton beta, forward only.
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=HAS_TLX)
     def tlx_blackwell_ws_pipelined_persistent_fwd(
         self,
         q: torch.Tensor,
