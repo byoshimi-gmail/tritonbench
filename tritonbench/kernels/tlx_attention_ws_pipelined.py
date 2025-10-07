@@ -42,6 +42,23 @@ configs = [
     ),
 ]
 
+configs_persistent = [
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+        },
+        num_stages=0,
+        num_warps=4,
+        pre_hook=_host_descriptor_pre_hook,
+    ),
+]
+
 
 @triton.jit
 def _get_bufidx_phase(accum_cnt, NUM_BUFFERS_KV):
@@ -61,6 +78,47 @@ def _compute_offsets(H, N_CTX, BLOCK_M):
     lo, hi = 0, N_CTX
     kv_offset_y = offset_y + lo
     return start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y
+
+
+@triton.jit
+def _fma_f32x2(a, b, c):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 ra, rb, rc, rd;
+            mov.b64 ra, { $2, $3 };
+            mov.b64 rb, { $4, $5 };
+            mov.b64 rc, { $6, $7 };
+            fma.rn.f32x2 rd, ra, rb, rc;
+            mov.b64 { $0, $1 }, rd;
+        }
+        """,
+        "=r,=r,r,r,r,r,r,r",
+        [a, b, c],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=2,
+    )
+
+
+@triton.jit
+def _mul_f32x2(a, b):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 ra, rb, rc;
+            mov.b64 ra, { $2, $3 };
+            mov.b64 rb, { $4, $5 };
+            mul.f32x2 rc, ra, rb;
+            mov.b64 { $0, $1 }, rc;
+        }
+        """,
+        "=r,=r,r,r,r,r",
+        [a, b],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=2,
+    )
 
 
 @triton.autotune(configs=configs, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
@@ -472,7 +530,7 @@ def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M):
     return start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y
 
 
-@triton.autotune(configs=configs, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
+@triton.autotune(configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
 @triton.jit
 def _attn_fwd_ws_persistent(
     sm_scale,
@@ -492,6 +550,7 @@ def _attn_fwd_ws_persistent(
     NUM_BUFFERS_KV: tl.constexpr,  #
     NUM_BUFFERS_QK: tl.constexpr,  #
     NUM_MMA_GROUPS: tl.constexpr,  #
+    NUM_MMA_SLICES: tl.constexpr,  #
 ):
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     tl.static_assert(NUM_MMA_GROUPS == 2)
@@ -593,24 +652,27 @@ def _attn_fwd_ws_persistent(
                 )
                 for _ in tl.range(lo, hi, BLOCK_N):
                     _, phase = _get_bufidx_phase(accum_cnt, 1)
-                    for cid in tl.range(
-                        0, NUM_MMA_GROUPS, loop_unroll_factor=NUM_MMA_GROUPS
-                    ):
+                    for cid in tl.static_range(0, NUM_MMA_GROUPS):
                         # -- update output accumulator --
                         tlx.barrier_wait(alpha_fulls[cid], phase)
                         # Use alpha[0] for cid=0, and alpha[HEAD_DIM] for cid=1
                         alpha_1 = tlx.local_load(alpha_tiles[cid * HEAD_DIM])
                         tlx.barrier_arrive(alpha_empties[cid])
-                        acc = tlx.local_load(acc_tiles[cid])
-                        acc = acc * alpha_1
-                        tlx.local_store(acc_tiles[cid], acc)
+                        for slice_id in tl.static_range(0, NUM_MMA_SLICES):
+                            subslice = tlx.subslice(
+                                acc_tiles[cid],
+                                HEAD_DIM * slice_id // NUM_MMA_SLICES,
+                                HEAD_DIM // NUM_MMA_SLICES,
+                            )
+                            acc = tlx.local_load(subslice)
+                            # acc = acc * alpha_1
+                            acc = _mul_f32x2(acc, alpha_1)
+                            tlx.local_store(subslice, acc)
                         tlx.barrier_arrive(acc_fulls[cid])
                     accum_cnt += 1
 
                 _, phase = _get_bufidx_phase(i, 1)
-                for cid in tl.range(
-                    0, NUM_MMA_GROUPS, loop_unroll_factor=NUM_MMA_GROUPS
-                ):
+                for cid in tl.static_range(0, NUM_MMA_GROUPS):
                     # epilogue
                     tlx.barrier_wait(l_fulls[cid], phase)
                     # Use l[1]/l[1+HEAD_DIM] and m[2][2 + HEAD_DIM]
@@ -646,9 +708,7 @@ def _attn_fwd_ws_persistent(
                     _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M)
                 )
                 _, phase = _get_bufidx_phase(i, 1)
-                for cid in tl.range(
-                    0, NUM_MMA_GROUPS, loop_unroll_factor=NUM_MMA_GROUPS
-                ):
+                for cid in tl.static_range(0, NUM_MMA_GROUPS):
                     tlx.barrier_wait(o_fulls[cid], phase)
                     tlx.fence_async_shared()
                     tlx.barrier_arrive(o_empties[cid])
@@ -661,7 +721,7 @@ def _attn_fwd_ws_persistent(
                 tile_idx += num_progs
 
         # softmax groups
-        with tlx.async_task(num_warps=4, registers=152, replicate=NUM_MMA_GROUPS):
+        with tlx.async_task(num_warps=4, registers=168, replicate=NUM_MMA_GROUPS):
             accum_cnt_qk = 0
             for i in range(0, tiles_per_sm):
                 # initialize offsets
@@ -691,7 +751,7 @@ def _attn_fwd_ws_persistent(
                     tlx.local_store(alpha_tiles[cid * HEAD_DIM], alpha[:, None])
                     tlx.barrier_arrive(alpha_fulls[cid])
 
-                    qk = qk * qk_scale - m_ij[:, None]
+                    qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
                     p = tl.math.exp2(qk)
                     l_ij = tl.sum(p, 1)
                     p = p.to(tlx.dtype_of(desc_v))
