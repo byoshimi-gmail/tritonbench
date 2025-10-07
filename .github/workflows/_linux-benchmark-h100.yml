@@ -119,12 +119,12 @@ jobs:
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}"" ]]; then
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
-                 --output "benchmark-output/clickouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
+                 --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
           fi
           if [[ -n "${TRITONBENCH_SIDE_B_ENV}"" ]]; then
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
-                 --output "benchmark-output/clickouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
+                 --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
           fi
       - name: Setup uploader dependencies
         run: |
@@ -132,7 +132,7 @@ jobs:
       - name: Upload result to ClickHouse
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
-          benchmark-results-dir: benchmark-output/clickouse-results
+          benchmark-results-dir: benchmark-output/clickhouse-results
           dry-run: false
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
