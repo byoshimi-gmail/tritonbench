@@ -10,7 +10,7 @@ on:
       test_type:
         required: True
         type: string
-        descript: |
+        description: |
           Type of the test (single or abtest)
       benchmark_name:
         required: True
