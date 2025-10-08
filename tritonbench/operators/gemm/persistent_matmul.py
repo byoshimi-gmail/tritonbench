@@ -5,9 +5,9 @@ import torch
 import triton
 import triton.language as tl
 
-from tritonbench.utils.env_utils import is_cuda, is_fbcode
+from tritonbench.utils.env_utils import is_cuda, is_fbcode, is_tile_enabled
 
-from .triton_matmul_configs import get_full_amd_config_space
+from .triton_matmul_configs import get_full_amd_config_space, get_tileir_configs
 
 if not is_fbcode():
     import triton.tools.experimental_descriptor
@@ -97,7 +97,11 @@ def _matmul_launch_metadata(grid, kernel, args):
     return ret
 
 
-if os.environ.get("FULL_AUTOTUNING_AMD", "0") == "1" and torch.version.hip is not None:
+if is_tile_enabled():
+    tuning_configs = get_tileir_configs()
+elif (
+    os.environ.get("FULL_AUTOTUNING_AMD", "0") == "1" and torch.version.hip is not None
+):
     tuning_configs = get_full_amd_config_space(False)
 else:
     tuning_configs = persistent_matmul_configs()

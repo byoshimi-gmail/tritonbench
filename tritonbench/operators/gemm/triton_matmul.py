@@ -9,7 +9,7 @@ import torch
 
 import triton
 import triton.language as tl
-from tritonbench.utils.env_utils import is_cuda, is_fbcode, is_tile_enabled
+from tritonbench.utils.env_utils import is_tile_enabled
 
 from .triton_matmul_configs import (
     configs,
