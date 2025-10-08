@@ -1,0 +1,1 @@
+modular @ https://dl.modular.com/public/nightly/python/modular-25.7.0.dev2025100805-py3-none-any.whl#sha256=11413134d2442bfd78647d422a3fffa7f0ff2d0bbecc272efecb22b9c7165b75

@@ -1,17 +1,13 @@
 """
-Benchmark mojo_matmul with modular nightly.
+Benchmark mojo on Blackwell with modular nightly.
 To install modular nightly:
 pip install --pre modular --index-url https://dl.modular.com/public/nightly/python/simple/
 """
 
-import argparse
-import json
-import logging
 import os
 import sys
 
 from os.path import abspath, exists
-from typing import Dict, List
 
 
 def setup_tritonbench_cwd():
