@@ -210,6 +210,8 @@ if is_tile_enabled():
                 "VECT_MUL": vectmul,
             },
             pre_hook=_host_descriptor_pre_hook,
+            minRegAutoWS=42,
+            maxRegAutoWS=152,
         )
         for BM in [64, 128, 256]
         for BN in [64, 128]
@@ -224,6 +226,8 @@ else:
             num_stages=s,
             num_warps=w,
             pre_hook=_host_descriptor_pre_hook,
+            minRegAutoWS=42,
+            maxRegAutoWS=152,
             # ir_override=f"override/_attn_fwd_persist.ttgir"
         )
         for BM in [256]
