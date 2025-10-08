@@ -330,6 +330,7 @@ def get_tileir_configs():
                                 "BLOCK_M": block_m,
                                 "BLOCK_N": block_n,
                                 "BLOCK_K": block_k,
+                                "GROUP_M": 8,
                                 "occupancy": occ,
                             },
                         )

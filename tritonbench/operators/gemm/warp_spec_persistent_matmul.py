@@ -10,6 +10,9 @@ import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+from tritonbench.utils.env_utils import is_tile_enabled
+
+from .triton_matmul_configs import get_tileir_configs
 
 # TODO: Add proton support
 
@@ -68,24 +71,42 @@ else:
 
 
 def matmul_get_configs(pre_hook=None):
-    return [
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": BM,
-                "BLOCK_SIZE_N": BN,
-                "BLOCK_SIZE_K": BK,
-                "GROUP_SIZE_M": 8,
-            },
-            num_stages=s,
-            num_warps=w,
-            pre_hook=pre_hook,
-        )
-        for BM in bm_range
-        for BN in bn_range
-        for BK in bk_range
-        for s in default_s_range
-        for w in [4, 8]
-    ]
+    if is_tile_enabled():
+        base_configs = get_tileir_configs()
+        # Append warp_spec specific information
+        configs = []
+        for config in base_configs:
+            new_kwargs = config.kwargs.copy()
+            new_kwargs["BLOCK_SIZE_M"] = config.pop("BLOCK_M")
+            new_kwargs["BLOCK_SIZE_N"] = config.pop("BLOCK_N")
+            new_kwargs["BLOCK_SIZE_K"] = config.pop("BLOCK_K")
+            new_kwargs["GROUP_SIZE_M"] = config.pop("GROUP_SIZE_M")
+            configs.append(
+                triton.Config(
+                    new_kwargs,
+                    pre_hook=pre_hook,
+                )
+            )
+        return configs
+    else:
+        return [
+            triton.Config(
+                {
+                    "BLOCK_SIZE_M": BM,
+                    "BLOCK_SIZE_N": BN,
+                    "BLOCK_SIZE_K": BK,
+                    "GROUP_SIZE_M": 8,
+                },
+                num_stages=s,
+                num_warps=w,
+                pre_hook=pre_hook,
+            )
+            for BM in bm_range
+            for BN in bn_range
+            for BK in bk_range
+            for s in default_s_range
+            for w in [4, 8]
+        ]
 
 
 def matmul_tma_set_block_size_hook(nargs):
@@ -244,26 +265,48 @@ def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_SMS):
 
 
 def matmul_tma_persistent_get_configs(pre_hook=None):
-    return [
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": BM,
-                "BLOCK_SIZE_N": BN,
-                "BLOCK_SIZE_K": BK,
-                "GROUP_SIZE_M": 8,
-                "EPILOGUE_SUBTILE": SUBTILE,
-            },
-            num_stages=s,
-            num_warps=w,
-            pre_hook=pre_hook,
-        )  #
-        for BM in bm_range  #
-        for BN in bn_range  #
-        for BK in bk_range  #
-        for s in tma_persistent_s_range  #
-        for w in [4, 8]  #
-        for SUBTILE in [True, False]  #
-    ]
+    if is_tile_enabled():
+        base_configs = get_tileir_configs()
+        # Append warp_spec specific information
+        configs = []
+        for config in base_configs:
+            new_kwargs = config.kwargs.copy()
+            new_kwargs["BLOCK_SIZE_M"] = config.pop("BLOCK_M")
+            new_kwargs["BLOCK_SIZE_N"] = config.pop("BLOCK_N")
+            new_kwargs["BLOCK_SIZE_K"] = config.pop("BLOCK_K")
+            new_kwargs["GROUP_SIZE_M"] = config.pop("GROUP_SIZE_M")
+            for SUBTILE in [True, False]:
+                configs.append(
+                    triton.Config(
+                        {
+                            "EPILOGUE_SUBTILE": SUBTILE,
+                            **new_kwargs,
+                        },
+                        pre_hook=pre_hook,
+                    )
+                )
+        return configs
+    else:
+        return [
+            triton.Config(
+                {
+                    "BLOCK_SIZE_M": BM,
+                    "BLOCK_SIZE_N": BN,
+                    "BLOCK_SIZE_K": BK,
+                    "GROUP_SIZE_M": 8,
+                    "EPILOGUE_SUBTILE": SUBTILE,
+                },
+                num_stages=s,
+                num_warps=w,
+                pre_hook=pre_hook,
+            )  #
+            for BM in bm_range  #
+            for BN in bn_range  #
+            for BK in bk_range  #
+            for s in tma_persistent_s_range  #
+            for w in [4, 8]  #
+            for SUBTILE in [True, False]  #
+        ]
 
 
 @triton.autotune(
