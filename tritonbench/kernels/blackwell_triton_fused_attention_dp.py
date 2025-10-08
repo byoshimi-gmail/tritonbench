@@ -28,6 +28,19 @@ from .blackwell_attention_utils import (
     supports_host_descriptor,
 )
 
+# Check if Triton version supports minRegAutoWS and maxRegAutoWS
+# These parameters are only available in triton/tree/ws-3.5
+def _supports_reg_auto_ws():
+    """Check if the current Triton version supports minRegAutoWS/maxRegAutoWS"""
+    try:
+        # Try to create a Config with minRegAutoWS to test support
+        test_config = triton.Config({}, minRegAutoWS=24, maxRegAutoWS=152)
+        return True
+    except (TypeError, AttributeError):
+        # Parameter not supported in this Triton version
+        return False
+
+HAS_REG_AUTO_WS = _supports_reg_auto_ws()
 
 @triton.jit
 def _attn_fwd_subtile(
@@ -221,20 +234,27 @@ else:
     NUM_STAGES_OPTIONS = [3]
 
 if is_tile_enabled():
+    # Helper to build config with optional minRegAutoWS/maxRegAutoWS
+    def make_tile_config(BM, BN, occ, subtile, vectmul, add2reduce):
+        config_kwargs = {
+            "BLOCK_M": BM,
+            "BLOCK_N": BN,
+            "occupancy": occ,
+            "SUBTILING": subtile,
+            "VECT_MUL": vectmul,
+            "FADD2_REDUCE": add2reduce,
+        }
+        extra_kwargs = {"pre_hook": _host_descriptor_pre_hook}
+
+        # Only add minRegAutoWS/maxRegAutoWS if supported (triton/tree/ws-3.5)
+        if HAS_REG_AUTO_WS:
+            extra_kwargs["minRegAutoWS"] = 24
+            extra_kwargs["maxRegAutoWS"] = 152
+
+        return triton.Config(config_kwargs, **extra_kwargs)
+
     configs = [
-        triton.Config(
-            {
-                "BLOCK_M": BM,
-                "BLOCK_N": BN,
-                "occupancy": occ,
-                "SUBTILING": subtile,
-                "VECT_MUL": vectmul,
-                "FADD2_REDUCE": add2reduce,
-            },
-            pre_hook=_host_descriptor_pre_hook,
-            minRegAutoWS=24,
-            maxRegAutoWS=152,
-        )
+        make_tile_config(BM, BN, occ, subtile, vectmul, add2reduce)
         for BM in [64, 128, 256]
         for BN in [64, 128]
         for occ in [1, 2]
@@ -243,22 +263,24 @@ if is_tile_enabled():
         for add2reduce in [False]
     ]
 else:
+    # Helper to build config with optional minRegAutoWS/maxRegAutoWS
+    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce):
+        config_kwargs = {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile, "VECT_MUL": vectmul, "FADD2_REDUCE": add2reduce,}
+        extra_kwargs = {
+            "num_stages": s,
+            "num_warps": w,
+            "pre_hook": _host_descriptor_pre_hook,
+        }
+
+        # Only add minRegAutoWS/maxRegAutoWS if supported (triton/tree/ws-3.5)
+        if HAS_REG_AUTO_WS:
+            extra_kwargs["minRegAutoWS"] = 24
+            extra_kwargs["maxRegAutoWS"] = 152
+
+        return triton.Config(config_kwargs, **extra_kwargs)
+
     configs = [
-        triton.Config(
-            {
-                "BLOCK_M": BM,
-                "BLOCK_N": BN,
-                "SUBTILING": subtile,
-                "VECT_MUL": vectmul,
-                "FADD2_REDUCE": add2reduce,
-            },
-            num_stages=s,
-            num_warps=w,
-            pre_hook=_host_descriptor_pre_hook,
-            minRegAutoWS=24,
-            maxRegAutoWS=152,
-            # ir_override=f"override/_attn_fwd_persist.ttgir"
-        )
+        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce)
         for BM in [256]
         for BN in [128]
         for s in NUM_STAGES_OPTIONS
