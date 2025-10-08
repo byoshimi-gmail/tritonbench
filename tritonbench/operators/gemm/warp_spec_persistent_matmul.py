@@ -80,7 +80,7 @@ def matmul_get_configs(pre_hook=None):
             new_kwargs["BLOCK_SIZE_M"] = new_kwargs.pop("BLOCK_M")
             new_kwargs["BLOCK_SIZE_N"] = new_kwargs.pop("BLOCK_N")
             new_kwargs["BLOCK_SIZE_K"] = new_kwargs.pop("BLOCK_K")
-            new_kwargs["GROUP_SIZE_M"] = new_kwargs.pop("GROUP_SIZE_M")
+            new_kwargs["GROUP_SIZE_M"] = new_kwargs.pop("GROUP_M")
             configs.append(
                 triton.Config(
                     new_kwargs,
@@ -274,7 +274,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             new_kwargs["BLOCK_SIZE_M"] = new_kwargs.pop("BLOCK_M")
             new_kwargs["BLOCK_SIZE_N"] = new_kwargs.pop("BLOCK_N")
             new_kwargs["BLOCK_SIZE_K"] = new_kwargs.pop("BLOCK_K")
-            new_kwargs["GROUP_SIZE_M"] = new_kwargs.pop("GROUP_SIZE_M")
+            new_kwargs["GROUP_SIZE_M"] = new_kwargs.pop("GROUP_M")
             for SUBTILE in [True, False]:
                 configs.append(
                     triton.Config(
