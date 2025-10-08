@@ -28,6 +28,7 @@ from .blackwell_attention_utils import (
     supports_host_descriptor,
 )
 
+
 # Check if Triton version supports minRegAutoWS and maxRegAutoWS
 # These parameters are only available in triton/tree/ws-3.5
 def _supports_reg_auto_ws():
@@ -40,7 +41,9 @@ def _supports_reg_auto_ws():
         # Parameter not supported in this Triton version
         return False
 
+
 HAS_REG_AUTO_WS = _supports_reg_auto_ws()
+
 
 @triton.jit
 def _attn_fwd_subtile(
@@ -265,7 +268,13 @@ if is_tile_enabled():
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
     def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce):
-        config_kwargs = {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile, "VECT_MUL": vectmul, "FADD2_REDUCE": add2reduce,}
+        config_kwargs = {
+            "BLOCK_M": BM,
+            "BLOCK_N": BN,
+            "SUBTILING": subtile,
+            "VECT_MUL": vectmul,
+            "FADD2_REDUCE": add2reduce,
+        }
         extra_kwargs = {
             "num_stages": s,
             "num_warps": w,
