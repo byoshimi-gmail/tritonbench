@@ -10,13 +10,6 @@ import torch
 import triton
 
 
-@lru_cache
-def is_tile_enabled():
-    # Note: This assumes you have the TileIR backend.
-    # We don't have a reliable way to check this at this time.
-    return os.getenv("ENABLE_TILE", "0") == "1"
-
-
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 

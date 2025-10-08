@@ -308,9 +308,30 @@ def get_full_amd_config_space(use_splitk: bool):
                                         config_dict,
                                         num_warps=num_warps,
                                         num_stages=2,
-                                        pre_hook=init_to_zero("C")
-                                        if use_splitk
-                                        else None,
+                                        pre_hook=(
+                                            init_to_zero("C") if use_splitk else None
+                                        ),
                                     )
                                 )
+    return configs
+
+
+def get_tileir_configs():
+    block_mnk_range = [16, 32, 64, 128, 256]
+    occ_range = [1, 2]
+    configs = []
+    for block_m in block_mnk_range:
+        for block_n in block_mnk_range:
+            for block_k in block_mnk_range:
+                for occ in occ_range:
+                    configs.append(
+                        triton.Config(
+                            {
+                                "BLOCK_M": block_m,
+                                "BLOCK_N": block_n,
+                                "BLOCK_K": block_k,
+                                "occupancy": occ,
+                            },
+                        )
+                    )
     return configs

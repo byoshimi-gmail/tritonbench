@@ -16,13 +16,13 @@ import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+from tritonbench.utils.env_utils import is_tile_enabled
 
 from .blackwell_attention_utils import (
     is_blackwell,
     is_cuda,
     is_hip,
     is_hopper,
-    is_tile_enabled,
     supports_host_descriptor,
 )
 

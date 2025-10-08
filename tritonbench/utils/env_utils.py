@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from contextlib import contextmanager, ExitStack
+from functools import lru_cache
 from typing import Optional
 
 import torch
@@ -77,6 +78,13 @@ def supports_tma():
 
 def is_cu130():
     return is_cuda() and torch.version.cuda == "13.0"
+
+
+@lru_cache
+def is_tile_enabled():
+    # Note: This assumes you have the TileIR backend.
+    # We don't have a reliable way to check this at this time.
+    return os.getenv("ENABLE_TILE", "0") == "1"
 
 
 def set_env():
