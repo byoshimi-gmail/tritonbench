@@ -18,7 +18,7 @@ from .triton_matmul_configs import (
 )
 
 if is_tile_enabled():
-    tile_configs = get_tileir_configs()
+    tuning_configs = get_tileir_configs()
 elif (
     os.environ.get("FULL_AUTOTUNING_AMD", "0") == "1" and torch.version.hip is not None
 ):
