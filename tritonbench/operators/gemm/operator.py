@@ -563,8 +563,12 @@ class Operator(BenchmarkOperator):
                 w = self._scaled_randn(
                     (actual_k, actual_n), scale=k, device=self.device, dtype=self.dtype
                 ).requires_grad_(requires_grad)
-                a = a.as_strided(size=[m, k], stride=strides[0]).requires_grad_(requires_grad)
-                w = w.as_strided(size=[k, n], stride=strides[1]).requires_grad_(requires_grad)
+                a = a.as_strided(size=[m, k], stride=strides[0]).requires_grad_(
+                    requires_grad
+                )
+                w = w.as_strided(size=[k, n], stride=strides[1]).requires_grad_(
+                    requires_grad
+                )
             else:
                 a = self._scaled_randn(
                     (m, k), scale=k, device=self.device, dtype=self.dtype
