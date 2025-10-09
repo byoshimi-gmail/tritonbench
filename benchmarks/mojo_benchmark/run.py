@@ -109,26 +109,41 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     output_func = lambda: model.execute(a_mojo_bf16, b_mojo_bf16)
     return output_func
 
+MNK = [
+    (512, 8192, 2048),
+    (4096, 8192, 2048),
+    (8192, 8192, 2048),
+    (512, 8192, 7168),
+    (4096, 8192, 7168),
+    (8192, 8192, 7168),
+    (512, 14336, 8192),
+    (4096, 14336, 8192),
+    (8192, 14336, 8192),
+    (512, 2560, 8192),
+    (4096, 2560, 8192),
+    (8192, 2560, 8192),
+    (4096, 4096, 4096),
+    (8192, 8192, 8192),
+    (512, 8192, 5376),
+    (4096, 8192, 5376),
+    (8192, 8192, 5376),
+]
+
 
 if __name__ == "__main__":
     args = [
         "--op",
         "gemm",
         "--only",
-        "aten_matmul,mojo_matmul",
+        "aten_matmul,mojo_matmul,tilelang_blackwell_matmul,triton_blackwell_warpspec_descriptor_matmul",
         "--precision",
         "bf16",
-        "--m",
-        "512",
-        "--n",
-        "8192",
-        "--k",
-        "5376",
     ] + sys.argv[1:]
     gemm_opbench_cls = load_opbench_by_name("gemm")
     parser = get_parser(args)
     tb_args, extra_args = parser.parse_known_args(args)
     gemm_opbench = gemm_opbench_cls(tb_args, extra_args)
+    gemm_opbench.shapes = MNK
     gemm_opbench.add_benchmark(bm_func_name="mojo_matmul", bm_callable=mojo_matmul)
     gemm_opbench.run()
     metrics = gemm_opbench.output
