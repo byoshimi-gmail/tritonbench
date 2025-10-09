@@ -956,7 +956,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self, bm_func_name: str, bm_callable: Callable, baseline: bool = False
     ):
         def _inner(self, *args, **kwargs):
-            return bm_callable(*args, **kwargs)
+            return bm_callable(self, *args, **kwargs)
 
         decorator_kwargs = {
             "operator_name": self.name,
@@ -967,9 +967,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         decorated_func = register_benchmark(**decorator_kwargs)(_inner)
         bound_method = types.MethodType(decorated_func, self)
         setattr(self, bm_func_name or bm_callable.__name__, bound_method)
-        if self.name not in REGISTERED_BENCHMARKS:
-            REGISTERED_BENCHMARKS[self.name] = {}
-        REGISTERED_BENCHMARKS[self.name][bm_func_name] = _inner
 
     def run(
         self,
