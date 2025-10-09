@@ -40,7 +40,7 @@ from max.graph.type import DType, Shape, ShapeLike
 
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.utils.parser import get_parser
-from tritonbench.utils.triton_op import register_benchmark
+from tritonbench.utils.run_utils import run_one_operator
 
 
 def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):
@@ -139,14 +139,6 @@ if __name__ == "__main__":
         "--precision",
         "bf16",
     ] + sys.argv[1:]
-    gemm_opbench_cls = load_opbench_by_name("gemm")
-    parser = get_parser(args)
-    tb_args, extra_args = parser.parse_known_args(args)
-    gemm_opbench = gemm_opbench_cls(tb_args, extra_args)
-    gemm_opbench.shapes = MNK
-    gemm_opbench.add_benchmark(bm_func_name="mojo_matmul", bm_callable=mojo_matmul)
-    gemm_opbench.run()
-    metrics = gemm_opbench.output
-    print(metrics)
+    run_one_operator(task_args=args, post_process=True)
     # TODO: promote the output to fp32 for numerics check
     # y_torch = torch.from_numpy(promote_mojo_tensor_to_fp32(outputs[0], dtype=DType.bfloat16)[0].to_numpy())

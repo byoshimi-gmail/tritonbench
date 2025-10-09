@@ -98,18 +98,83 @@ def run_config(config_file: str, args: List[str]):
             extra_envs=extra_envs,
         )
 
+def _post_process_one_operator(run_timestamp, tb_args, op):
+    metrics = op.output
+    if not tb_args.skip_print:
+        if tb_args.csv:
+            metrics.write_csv_to_file(sys.stdout)
+        else:
+            print(metrics)
+    if is_fbcode() and tb_args.log_scuba:
+        from ..fb.utils import log_benchmark  # @manual
 
-def run_one_operator(task_args: List[str], with_bwd: bool = False):
+        kwargs = {
+            "metrics": metrics,
+            "benchmark_name": tb_args.op,
+            "device": tb_args.device,
+            "logging_group": tb_args.logging_group or tb_args.op,
+            "precision": tb_args.precision,
+        }
+        if tb_args.production_shapes:
+            from tritonbench.utils.fb.durin_data import productionDataLoader
+
+            kwargs["weights_loader"] = productionDataLoader
+
+        if "hardware" in args:
+            kwargs["hardware"] = tb_args.hardware
+        if "triton_type" in tb_args:
+            kwargs["triton_type"] = tb_args.triton_type
+        log_benchmark(**kwargs)
+    # Log benchmark output to scuba even if not in fbcode
+    if tb_args.log_scuba and not is_fbcode():
+        from tritonbench.utils.scuba_utils import log_benchmark
+
+        log_benchmark(
+            benchmark_data=None, run_timestamp=run_timestamp, opbench=op
+        )
+
+    if tb_args.plot:
+        try:
+            opbench.plot()
+        except NotImplementedError:
+            print(f"Plotting is not implemented for {tb_args.op}")
+
+    if tb_args.output:
+        with open(tb_args.output, "w") as f:
+            metrics.write_csv_to_file(f)
+        print(f"[tritonbench] Output result csv to {tb_args.output}")
+
+    if tb_args.output_json:
+        with open(tb_args.output_json, "w") as f:
+            metrics.write_json_to_file(f)
+    if tb_args.output_dir:
+        if tb_args.csv:
+            output_file = os.path.join(tb_args.output_dir, f"{tb_args.op}.csv")
+            with open(output_file, "w") as f:
+                metrics.write_csv_to_file(f)
+        else:
+            output_file = os.path.join(tb_args.output_dir, f"{tb_args.op}.json")
+            with open(output_file, "w") as f:
+                metrics.write_json_to_file(f)
+
+
+def run_one_operator(task_args: List[str], with_bwd: bool = False, post_process: bool = False):
     from tritonbench.operators import (  # @manual=//pytorch/tritonbench:tritonbench
         load_opbench_by_name,
     )
 
+    run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     parser = get_parser(task_args)
     tb_args, extra_args = parser.parse_known_args(task_args)
     Operator = load_opbench_by_name(tb_args.op)
 
     op = Operator(tb_args=tb_args, extra_args=extra_args)
-    op.run()
+    try:
+        op.run()
+    finally:
+        if post_process:
+            _post_process_one_operator(run_timestamp, tb_args, op)
+
     if with_bwd and op.has_bwd() and not tb_args.op in FWD_ONLY_OPS:
         del op
         if tb_args.op in BWD_ARGS_OPS:
@@ -117,7 +182,12 @@ def run_one_operator(task_args: List[str], with_bwd: bool = False):
             tb_args, extra_args = parser.parse_known_args(task_args)
         tb_args.mode = "bwd"
         op = Operator(tb_args=tb_args, extra_args=extra_args)
-        op.run()
+        try:
+            op.run()
+        finally:
+            if post_process:
+                _post_process_one_operator(run_timestamp, tb_args, op)
+
 
 
 def run_in_task(
