@@ -1142,7 +1142,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             )
             if getattr(self, "_cur_input_id", None) is not None:
                 logger.warning(
-                    "Failing input: --input-id %s --num-inputs 1",
+                    "Failing input: --input-id %s --num-inputs 1 --input-sample-mode first-k",
                     self._cur_input_id,
                 )
             if self.tb_args.exit_on_exception:
