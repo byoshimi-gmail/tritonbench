@@ -872,15 +872,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             # Expand single ID to sequential range
             self._input_ids = list(range(start_id, start_id + self._num_inputs))
 
-            print(
+            logger.warning(
                 f"First-k mode: Selected {len(self._input_ids)} sequential inputs starting from index {start_id} "
                 f"(total available: {self._available_num_inputs})",
-                file=sys.stderr,
             )
 
-        print(
+        logger.info(
             f"Input IDs to run: {self._input_ids}",
-            file=sys.stderr,
         )
 
     def _get_bm_func(self, bm_func_name: str):
@@ -956,20 +954,33 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self, bm_func_name: str, bm_callable: Callable, baseline: bool = False
     ):
         def _inner(self, *args, **kwargs):
-            return bm_callable(*args, **kwargs)
+            # Return a callable that captures the inputs and calls the benchmark function
+            def benchmark_fn():
+                return bm_callable(*args, **kwargs)
 
-        decorator_kwargs = {
-            "operator_name": self.name,
-            "func_name": bm_func_name,
-            "enabled": True,
-            "baseline": baseline,
-        }
-        decorated_func = register_benchmark(**decorator_kwargs)(_inner)
-        bound_method = types.MethodType(decorated_func, self)
-        setattr(self, bm_func_name or bm_callable.__name__, bound_method)
+            return benchmark_fn
+
+        # Create the backend config object like register_benchmark does
+        backend_config = BenchmarkOperatorBackend(
+            name=bm_func_name,
+            label=bm_func_name,
+            baseline=baseline,
+            enabled=True,
+            fwd_only=False,
+        )
+
+        # Register the backend config in REGISTERED_BENCHMARKS
         if self.name not in REGISTERED_BENCHMARKS:
-            REGISTERED_BENCHMARKS[self.name] = {}
-        REGISTERED_BENCHMARKS[self.name][bm_func_name] = _inner
+            REGISTERED_BENCHMARKS[self.name] = OrderedDict()
+        REGISTERED_BENCHMARKS[self.name][bm_func_name] = backend_config
+
+        # Set baseline if needed
+        if backend_config.baseline:
+            BASELINE_BENCHMARKS[self.name] = bm_func_name
+
+        # Bind the method to the instance
+        bound_method = types.MethodType(_inner, self)
+        setattr(self, bm_func_name or bm_callable.__name__, bound_method)
 
     def run(
         self,
