@@ -1043,7 +1043,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 # read partially initialized values (e.g. from torch.randint)
                 # and hit device-side asserts in the baseline kernels.
                 if self.use_cuda_graphs:
-                    torch.accelerator.synchronize()
+                    if torch.accelerator.is_available():
+                        torch.accelerator.synchronize()
                 self.baseline_fn = None
                 self.baseline_metrics = None
                 self._op_flops = {}
@@ -1115,7 +1116,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         baseline=baseline,
                     )
                     # Synchronize after each benchmark to make errors surface sooner
-                    torch.accelerator.synchronize()
+                    if torch.accelerator.is_available():
+                        torch.accelerator.synchronize()
                     if baseline:
                         self.baseline_metrics = acc[bm_name]
                     if sleep:
