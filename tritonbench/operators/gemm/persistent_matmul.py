@@ -1,5 +1,5 @@
 import os
-from functools import lru_cache
+from collections import OrderedDict
 
 import torch
 import triton
@@ -10,7 +10,7 @@ from tritonbench.utils.env_utils import is_cuda, is_fbcode
 from .triton_matmul_configs import get_full_amd_config_space
 
 if not is_fbcode():
-    import triton.tools.experimental_descriptor
+    from triton.tools.tensor_descriptor import TensorDescriptor
 
     if is_cuda():
         from triton._C.libtriton import nvidia
@@ -21,6 +21,11 @@ if not is_fbcode():
         cublas = nvidia.cublas.CublasLt(cublas_workspace)
     else:
         cublas = None
+else:
+    TensorDescriptor = None
+
+
+_DESCRIPTOR_CACHE = OrderedDict()
 
 
 def persistent_matmul_configs():
@@ -248,9 +253,9 @@ def matmul_persistent(a, b):
 
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_tma_persistent(
-    a_desc_ptr,
-    b_desc_ptr,
-    c_desc_ptr,  #
+    a_desc,
+    b_desc,
+    c_desc,  #
     M,
     N,
     K,  #
@@ -299,18 +304,14 @@ def matmul_kernel_tma_persistent(
 
         offs_k = ki * BLOCK_SIZE_K
 
-        a = tl._experimental_descriptor_load(
-            a_desc_ptr, [offs_am, offs_k], [BLOCK_SIZE_M, BLOCK_SIZE_K], dtype
-        )
-        b = tl._experimental_descriptor_load(
-            b_desc_ptr, [offs_bn, offs_k], [BLOCK_SIZE_N, BLOCK_SIZE_K], dtype
-        )
+        a = a_desc.load([offs_am, offs_k])
+        b = b_desc.load([offs_bn, offs_k])
         accumulator = tl.dot(a, b.T, accumulator)
 
         if ki == k_tiles - 1:
             c = accumulator.to(dtype)
 
-            tl._experimental_descriptor_store(c_desc_ptr, c, [offs_am, offs_bn])
+            c_desc.store([offs_am, offs_bn], c)
             accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
 
@@ -352,29 +353,27 @@ def matmul_tma_persistent(a, b):
     dtype = a.dtype
 
     c = torch.empty((M, N), device=a.device, dtype=dtype)
-    desc_a = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-        a.data_ptr(),
-        M,
-        K,
-        configs[dtype]["BLOCK_SIZE_M"],
-        configs[dtype]["BLOCK_SIZE_K"],
-        a.element_size(),
+    block_size_m = configs[dtype]["BLOCK_SIZE_M"]
+    block_size_n = configs[dtype]["BLOCK_SIZE_N"]
+    block_size_k = configs[dtype]["BLOCK_SIZE_K"]
+
+    desc_a = TensorDescriptor(
+        a,
+        list(a.shape),
+        list(a.stride()),
+        [block_size_m, block_size_k],
     )
-    desc_b = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-        b.data_ptr(),
-        N,
-        K,
-        configs[dtype]["BLOCK_SIZE_N"],
-        configs[dtype]["BLOCK_SIZE_K"],
-        b.element_size(),
+    desc_b = TensorDescriptor(
+        b,
+        list(b.shape),
+        list(b.stride()),
+        [block_size_n, block_size_k],
     )
-    desc_c = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-        c.data_ptr(),
-        M,
-        N,
-        configs[dtype]["BLOCK_SIZE_M"],
-        configs[dtype]["BLOCK_SIZE_N"],
-        c.element_size(),
+    desc_c = TensorDescriptor(
+        c,
+        list(c.shape),
+        list(c.stride()),
+        [block_size_m, block_size_n],
     )
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
 
@@ -403,11 +402,29 @@ def matmul_tma_persistent(a, b):
     return c
 
 
-@lru_cache(3)
-def cached_descriptor(data_ptr, s0, s1, b0, b1, elt_size):
-    return triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-        data_ptr, s0, s1, b0, b1, elt_size
+def cached_descriptor(tensor, block_shape):
+    key = (
+        tensor.data_ptr(),
+        tuple(tensor.shape),
+        tuple(tensor.stride()),
+        tuple(block_shape),
+        tensor.dtype,
     )
+    desc = _DESCRIPTOR_CACHE.get(key)
+    if desc is None:
+        desc = TensorDescriptor(
+            tensor,
+            list(tensor.shape),
+            list(tensor.stride()),
+            list(block_shape),
+        )
+        _DESCRIPTOR_CACHE[key] = desc
+        if len(_DESCRIPTOR_CACHE) > 3:
+            _DESCRIPTOR_CACHE.popitem(last=False)
+    else:
+        _DESCRIPTOR_CACHE.move_to_end(key)
+        desc.block_shape = list(block_shape)
+    return desc
 
 
 def matmul_tma_persistent_cached(a, b):
@@ -448,29 +465,18 @@ def matmul_tma_persistent_cached(a, b):
     dtype = a.dtype
 
     c = torch.empty((M, N), device=a.device, dtype=dtype)
-    desc_a = cached_descriptor(
-        a.data_ptr(),
-        M,
-        K,
-        configs[dtype]["BLOCK_SIZE_M"],
-        configs[dtype]["BLOCK_SIZE_K"],
-        a.element_size(),
-    )
-    desc_b = cached_descriptor(
-        b.data_ptr(),
-        N,
-        K,
-        configs[dtype]["BLOCK_SIZE_N"],
-        configs[dtype]["BLOCK_SIZE_K"],
-        b.element_size(),
-    )
-    desc_c = cached_descriptor(
-        c.data_ptr(),
-        M,
-        N,
-        configs[dtype]["BLOCK_SIZE_M"],
-        configs[dtype]["BLOCK_SIZE_N"],
-        c.element_size(),
+    block_size_m = configs[dtype]["BLOCK_SIZE_M"]
+    block_size_n = configs[dtype]["BLOCK_SIZE_N"]
+    block_size_k = configs[dtype]["BLOCK_SIZE_K"]
+
+    desc_a = cached_descriptor(a, [block_size_m, block_size_k])
+    desc_b = cached_descriptor(b, [block_size_n, block_size_k])
+    # Output descriptors are short-lived, but keep the interface consistent.
+    desc_c = TensorDescriptor(
+        c,
+        list(c.shape),
+        list(c.stride()),
+        [block_size_m, block_size_n],
     )
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
 
