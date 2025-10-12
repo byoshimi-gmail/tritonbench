@@ -215,7 +215,7 @@ if is_tile_enabled():
         for BN in [64, 128]
         for occ in [1, 2]
         for subtile in [True]
-        for vectmul in [True]
+        for vectmul in [False]
     ]
 else:
     configs = [
