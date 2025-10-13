@@ -201,7 +201,7 @@ class Operator(BenchmarkOperator):
             use_warp_specialization=self.warp_specialization,
         )
 
-    @register_benchmark(enabled=HAS_TRITON)
+    @register_benchmark(enabled=False)
     def _aoti_fp8_triton_mm(self, xq, wq, x_scale, w_scale, bias) -> Callable:
         return lambda: aoti_fp8_triton_mm(
             xq,
