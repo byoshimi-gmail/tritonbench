@@ -55,6 +55,16 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
+def get_fp8_dtype():
+    if torch.version.cuda:
+        return torch.float8_e4m3fn
+    elif torch.version.hip:
+        if torch.cuda.get_device_capability() < (9, 5):
+            return torch.float8_e4m3fnuz
+        return torch.float8_e4m3fn
+    return torch.float8_e4m3fnuz
+
+
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "gbps", "latency"]
     DEFAULT_PRECISION = "fp8"
@@ -65,6 +75,8 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args)
         self.extra_args = parse_args(extra_args)
+
+        self.fp8_dtype = get_fp8_dtype()
 
     def _get_dtype(self):
         if self.extra_args.scaling_rowwise:
@@ -79,7 +91,7 @@ class Operator(BenchmarkOperator):
             # For tensor-wise scaling, kernel requires a float32 scale tensor
             if custom_scale:
                 return torch.tensor(custom_scale, dtype=torch.float32, device=x.device)
-            scale = torch.finfo(torch.float8_e4m3fn).max / x.abs().max()
+            scale = torch.finfo(self.fp8_dtype).max / x.abs().max()
             return scale.to(torch.float32)
 
         def _get_scale_per_row(
@@ -87,12 +99,12 @@ class Operator(BenchmarkOperator):
         ) -> torch.Tensor:
             if transpose:  # scale_b.shape should be [1, N]
                 scale = (
-                    torch.finfo(torch.float8_e4m3fn).max
+                    torch.finfo(self.fp8_dtype).max
                     / x.abs().max(dim=0, keepdim=True).values
                 )
             else:  # scale_a.shape should be [M, 1]
                 scale = (
-                    torch.finfo(torch.float8_e4m3fn).max
+                    torch.finfo(self.fp8_dtype).max
                     / x.abs().max(dim=1, keepdim=True).values
                 )
             return scale.to(
@@ -114,9 +126,9 @@ class Operator(BenchmarkOperator):
                     b, custom_scale=self.extra_args.per_tensor_scale_b
                 )
 
-            # Kernels expect dtype=float8_e4m3fn
-            a = a.to(torch.float8_e4m3fn)
-            b = b.to(torch.float8_e4m3fn)
+            # Kernels expect dtype=float8_e4m3fn(uz)
+            a = a.to(self.fp8_dtype)
+            b = b.to(self.fp8_dtype)
 
             return (a, b, scale_a, scale_b)
 
