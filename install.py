@@ -147,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--xformers", action="store_true", help="Install xformers")
     parser.add_argument("--tile", action="store_true", help="install tile lang")
     parser.add_argument("--aiter", action="store_true", help="install AMD's aiter")
+    parser.add_argument("--cutlass", action="store_true", help="install cutlass")
     parser.add_argument(
         "--tritonparse", action="store_true", help="Install tritonparse"
     )
@@ -183,6 +184,11 @@ if __name__ == "__main__":
     if args.fa2 or args.all:
         logger.info("[tritonbench] installing fa2 from source...")
         install_fa2(compile=True)
+    if args.cutlass or args.all:
+        logger.info("[tritonbench] installing cutlass...")
+        from tools.cutlass.install import install_cutlass
+
+        install_cutlass()
     if args.jax or args.all:
         logger.info("[tritonbench] installing jax...")
         install_jax()
