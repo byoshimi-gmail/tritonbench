@@ -877,7 +877,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 f"(total available: {self._available_num_inputs})",
             )
 
-        logger.info(
+        logger.warning(
             f"Input IDs to run: {self._input_ids}",
         )
 
