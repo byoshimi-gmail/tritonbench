@@ -100,7 +100,7 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--mod-type",
         type=str,
-        default="noop",
+        default="all",
         choices=allowed_mods,
         help="Mask type",
     )
@@ -335,6 +335,7 @@ class Operator(BenchmarkOperator):
         kernel_options: dict[str, Any],
     ) -> Optional[Callable]:
         """Flash Attention v3 implementation."""
+
         # Check dtype compatibility
         if q.dtype not in [torch.float16, torch.bfloat16]:
             print(f"[SKIP] Flash Attention v3 only supports fp16/bf16, got {q.dtype}")
@@ -355,9 +356,15 @@ class Operator(BenchmarkOperator):
         FA_kwargs = {}
 
         if mod_type == "alibi":
+            """
             h = torch.arange(Hq, dtype=torch.float32, device="cuda")
             alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
             FA_kwargs["alibi_slopes"] = alibi_slopes
+
+            TODO: Flash Attention v3 runs into:
+            RuntimeError: This flash attention build does not support alibi.
+            """
+            return unsupported_fn
 
         # Build the appropriate Flash Attention callable
         if mod_type == "noop":
