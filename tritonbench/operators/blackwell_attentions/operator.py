@@ -18,6 +18,7 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
 
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
+from tritonbench.kernels.blackwell_attention_utils import is_blackwell
 
 try:
     from tritonbench.kernels.blackwell_triton_fused_attention import (
@@ -183,6 +184,7 @@ def _is_sdpa_cudnn_attention_available():
 
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
+    DEFAULT_METRICS = ["latency", "tflops", "tbps"]
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
@@ -470,7 +472,7 @@ class Operator(BenchmarkOperator):
             q, k, v, self.causal, self.sm_scale, "ws"
         )
 
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=is_blackwell() and HAS_BLACKWELL_AUTOWS)
     def triton_tutorial_flash_dp_persistent_blackwell(
         self,
         q: torch.Tensor,
