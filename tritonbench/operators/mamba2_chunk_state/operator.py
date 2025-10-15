@@ -1,20 +1,17 @@
 import argparse
-import os
-from contextlib import nullcontext
-from itertools import chain
-from tritonbench.utils.python_utils import try_import
 import functools
 import itertools
-
-from typing import Callable, Optional
-import sys
 import os
+import sys
+from contextlib import nullcontext
+from itertools import chain
+
+from typing import Any, Callable, Generator, List, Optional
 
 import torch
 
-from typing import Any, Generator, List
-
 from tritonbench.utils.input import input_filter
+from tritonbench.utils.python_utils import try_import
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -26,22 +23,37 @@ from tritonbench.utils.triton_op import (
 )
 
 with try_import("HAS_MAMBA_SSM"):
-    from mamba_ssm.ops.triton.ssd_chunk_state import chunk_state as mamba_ssm_chunk_state_fwd
-    mamba_ssm_chunk_state_fwd = functools.partial(mamba_ssm_chunk_state_fwd, states_in_fp32=False)
-    from mamba_ssm.ops.triton.ssd_chunk_state import chunk_state_ref as mamba_ssm_chunk_state_ref
+    from mamba_ssm.ops.triton.ssd_chunk_state import (
+        chunk_state as mamba_ssm_chunk_state_fwd,
+    )
+
+    mamba_ssm_chunk_state_fwd = functools.partial(
+        mamba_ssm_chunk_state_fwd, states_in_fp32=False
+    )
+    from mamba_ssm.ops.triton.ssd_chunk_state import (
+        chunk_state_ref as mamba_ssm_chunk_state_ref,
+    )
+
     HAS_MAMBA_SSM = True
 
 with try_import("HAS_TILELANG"):
     import tilelang
+
     TL_ROOT = os.getenv("TL_ROOT", os.path.dirname(os.path.abspath(tilelang.__file__)))
     sys.path.append(f"{TL_ROOT}/examples/linear_attention")
-    from example_mamba_chunk_state import chunk_state_fwd as tilelang_example_chunk_state_fwd_kernel
+    from example_mamba_chunk_state import (
+        chunk_state_fwd as tilelang_example_chunk_state_fwd_kernel,
+    )
+
     def tilelang_example_chunk_state_fwd(B, x, dt, dA_cumsum):
         batch, seqlen, ngroups, dstate = B.shape
         batch, seqlen, nheads, dhead = x.shape
         batch, nheads, nchunks, chunk_size = dt.shape
         batch, nheads, nchunks, chunk_size = dA_cumsum.shape
-        return tilelang_example_chunk_state_fwd_kernel(batch, seqlen, chunk_size, ngroups, nheads, dhead, dstate)(B, x, dt, dA_cumsum)
+        return tilelang_example_chunk_state_fwd_kernel(
+            batch, seqlen, chunk_size, ngroups, nheads, dhead, dstate
+        )(B, x, dt, dA_cumsum)
+
 
 def torch_chunk_state_fwd(B, x, dt, dA_cumsum):
     """
@@ -71,19 +83,42 @@ def torch_chunk_state_fwd(B, x, dt, dA_cumsum):
     x = x.reshape(batch, nchunks, chunk_size, nheads, dhead)
     B = B.reshape(batch, nchunks, chunk_size, nheads, dstate)
     decay_states = torch.exp((dA_cumsum[:, :, :, -1:] - dA_cumsum))
-    return torch.einsum("bclhn,bhcl,bhcl,bclhp->bchpn", B.to(x.dtype), decay_states.to(x.dtype),
-                        dt.to(x.dtype), x)
+    return torch.einsum(
+        "bclhn,bhcl,bhcl,bclhp->bchpn",
+        B.to(x.dtype),
+        decay_states.to(x.dtype),
+        dt.to(x.dtype),
+        x,
+    )
 
 
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch", type=int, nargs="+", default=[1, 64], help="Batch size")
-    parser.add_argument("--n-heads", type=int, nargs="+", default=[64], help="Number of heads")
-    parser.add_argument("--n-groups", type=int, nargs="+", default=[1], help="Number of groups")
-    parser.add_argument("--seq-len", type=int, nargs="+", default=[1024, 2048, 8192], help="Sequence length")
-    parser.add_argument("--chunk-size", type=int, nargs="+", default=[256], help="Chunk size")
-    parser.add_argument("--d-head", type=int, nargs="+", default=[64], help="Head dimension")
-    parser.add_argument("--d-state", type=int, nargs="+", default=[128], help="State dimension")
+    parser.add_argument(
+        "--batch", type=int, nargs="+", default=[1, 64], help="Batch size"
+    )
+    parser.add_argument(
+        "--n-heads", type=int, nargs="+", default=[64], help="Number of heads"
+    )
+    parser.add_argument(
+        "--n-groups", type=int, nargs="+", default=[1], help="Number of groups"
+    )
+    parser.add_argument(
+        "--seq-len",
+        type=int,
+        nargs="+",
+        default=[1024, 2048, 8192],
+        help="Sequence length",
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, nargs="+", default=[256], help="Chunk size"
+    )
+    parser.add_argument(
+        "--d-head", type=int, nargs="+", default=[64], help="Head dimension"
+    )
+    parser.add_argument(
+        "--d-state", type=int, nargs="+", default=[128], help="State dimension"
+    )
     return parser.parse_args(args)
 
 
@@ -170,15 +205,39 @@ class Operator(BenchmarkOperator):
         return gb / metrics.latency * 1e3
 
     def get_shape_iter(self) -> Generator:
-        return itertools.product(self.BATCH, self.NHEADS, self.NGROUPS, self.SEQLEN, self.CHUNK_SIZE, self.DHEAD, self.DSTATE)
+        return itertools.product(
+            self.BATCH,
+            self.NHEADS,
+            self.NGROUPS,
+            self.SEQLEN,
+            self.CHUNK_SIZE,
+            self.DHEAD,
+            self.DSTATE,
+        )
 
     def get_input_iter(self) -> Generator:
-        for batch, nheads, ngroups, seqlen, chunk_size, dhead, dstate in self.get_shape_iter():
+        for (
+            batch,
+            nheads,
+            ngroups,
+            seqlen,
+            chunk_size,
+            dhead,
+            dstate,
+        ) in self.get_shape_iter():
             nchunks = (seqlen + chunk_size - 1) // chunk_size
-            B = torch.rand(batch, seqlen, ngroups, dstate, dtype=self.dtype, device=self.device)
-            x = torch.rand(batch, seqlen, nheads, dhead, dtype=self.dtype, device=self.device)
-            dt = torch.rand(batch, nheads, nchunks, chunk_size, dtype=self.dtype, device=self.device)
-            dA_cumsum = torch.rand(batch, nheads, nchunks, chunk_size, dtype=self.dtype, device=self.device)
+            B = torch.rand(
+                batch, seqlen, ngroups, dstate, dtype=self.dtype, device=self.device
+            )
+            x = torch.rand(
+                batch, seqlen, nheads, dhead, dtype=self.dtype, device=self.device
+            )
+            dt = torch.rand(
+                batch, nheads, nchunks, chunk_size, dtype=self.dtype, device=self.device
+            )
+            dA_cumsum = torch.rand(
+                batch, nheads, nchunks, chunk_size, dtype=self.dtype, device=self.device
+            )
             yield B, x, dt, dA_cumsum
 
     @register_x_val(label="(Batch, Heads, Groups, SeqLen, ChunkSize, Dhead, Dstate)")
