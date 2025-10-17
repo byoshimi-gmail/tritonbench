@@ -177,14 +177,14 @@ if __name__ == "__main__":
         from tools.flash_attn.install import install_fa3
 
         install_fa3()
-    if args.fbgemm or args.fbgemm_all or args.all:
+    if args.fbgemm or args.fbgemm_all:
         logger.info("[tritonbench] installing FBGEMM...")
         install_fbgemm(genai=(not args.fbgemm_all))
         test_fbgemm()
     if args.fa2:
         logger.info("[tritonbench] installing fa2 from source...")
         install_fa2(compile=True)
-    if args.jax or args.all:
+    if args.jax:
         logger.info("[tritonbench] installing jax...")
         install_jax()
     if args.tk or args.all:
