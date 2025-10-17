@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/actions/actions-runner:latest
+ARG BASE_IMAGE=ghcr.io/actions/actions-runner:2.328.0
 FROM ${BASE_IMAGE}
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
