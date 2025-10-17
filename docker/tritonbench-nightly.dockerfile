@@ -83,10 +83,6 @@ RUN cd /workspace/tritonbench && \
         python -m tools.cuda_utils --check-torch-nightly-version --force-date "${FORCE_DATE}"; \
     fi
 
-# Tritonbench library build and test require libcuda.so.1
-# which is from NVIDIA driver
-# RUN sudo apt update && sudo apt-get install -y libnvidia-compute-550
-
 # Workaround: installing Ninja from setup.py hits "Failed to decode METADATA with UTF-8" error
 RUN . ${SETUP_SCRIPT} && pip install ninja
 
@@ -97,9 +93,6 @@ RUN cd /workspace/tritonbench && \
 # Install Tritonbench
 RUN cd /workspace/tritonbench && \
     bash .ci/tritonbench/install.sh
-
-# Remove NVIDIA driver library - they are supposed to be mapped at runtime
-# RUN sudo apt-get purge -y libnvidia-compute-550
 
 # Build triton-main conda env
 RUN cd /workspace/tritonbench && \
