@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/actions/actions-runner:2.328.0
+ARG BASE_IMAGE=ghcr.io/actions/actions-runner:latest
 FROM ${BASE_IMAGE}
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
@@ -85,7 +85,7 @@ RUN cd /workspace/tritonbench && \
 
 # Tritonbench library build and test require libcuda.so.1
 # which is from NVIDIA driver
-RUN sudo apt update && sudo apt-get install -y libnvidia-compute-550
+# RUN sudo apt update && sudo apt-get install -y libnvidia-compute-550
 
 # Workaround: installing Ninja from setup.py hits "Failed to decode METADATA with UTF-8" error
 RUN . ${SETUP_SCRIPT} && pip install ninja
@@ -99,7 +99,7 @@ RUN cd /workspace/tritonbench && \
     bash .ci/tritonbench/install.sh
 
 # Remove NVIDIA driver library - they are supposed to be mapped at runtime
-RUN sudo apt-get purge -y libnvidia-compute-550
+# RUN sudo apt-get purge -y libnvidia-compute-550
 
 # Build triton-main conda env
 RUN cd /workspace/tritonbench && \
