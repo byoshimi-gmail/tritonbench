@@ -19,6 +19,7 @@ def get_metadata(name: str, path: Path = METADATA_PATH) -> Any:
 
 
 TRITON_OPS = get_metadata("oss_triton_operators")["triton_ops"]
+TRITON_OPS.update(get_metadata("oss_triton_operators")["oss_only"])
 DTYPE_OPS = get_metadata("dtype_operators")
 TFLOPS_OPS = get_metadata("tflops_operators")
 BASELINE_OPS = get_metadata("baseline_operators")
