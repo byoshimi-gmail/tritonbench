@@ -13,6 +13,7 @@ Step 1: clone the repository and checkout all submodules
 
 ```
 $ git clone https://github.com/meta-pytorch/tritonbench.git
+$ cd tritonbench
 $ git submodule update --init --recursive
 ```
 
