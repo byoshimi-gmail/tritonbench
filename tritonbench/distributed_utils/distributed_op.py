@@ -1,6 +1,6 @@
 import argparse
-
-from tritonbench.utils.triton_op import register_benchmark
+import torch
+import nvshmem.core
 from typing import List
 
 
@@ -13,3 +13,10 @@ class DistributedOperator:
         pass
         # setup context
         ctx = create_distributed_context()
+
+    def accuracy(self):
+        pass
+
+    def finalize(self):
+        nvshmem.core.finalize()
+        torch.distributed.destroy_process_group()
