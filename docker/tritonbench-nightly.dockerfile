@@ -34,7 +34,7 @@ RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pyt
     mkdir ci_commit_pins && cd ci_commit_pins && \
     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
 
-RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; . install_cuda.sh; install_cuda 12.8.1 cuda_12.8.1_570.124.06_linux; install_cudnn 12 9.8.0.87; install_nvshmem 12 3.3.24"
+RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
