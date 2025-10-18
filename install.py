@@ -177,7 +177,7 @@ if __name__ == "__main__":
         from tools.flash_attn.install import install_fa3
 
         install_fa3()
-    if args.fbgemm or args.fbgemm_all:
+    if args.fbgemm or args.fbgemm_all or args.all:
         logger.info("[tritonbench] installing FBGEMM...")
         install_fbgemm(genai=(not args.fbgemm_all))
         test_fbgemm()
